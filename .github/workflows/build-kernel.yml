@@ -23,79 +23,61 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y git make zip device-tree-compiler gcc flex bison libssl-dev bc python3
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends git make zip device-tree-compiler flex bison libssl-dev bc python3 zstd
 
-      - name: Cache Proton Clang
-        id: cache-tc
-        uses: actions/cache@v4
+      - name: Restore Neutron Clang from cache
+        id: cache-neutron
+        uses: actions/cache/restore@v4
         with:
-          path: ~/proton-clang
-          key: proton-clang-20241228
+          path: ~/neutron-clang
+          key: neutron-clang-17-20250426
 
-      - name: Clone Proton Clang
-        if: steps.cache-tc.outputs.cache-hit != 'true'
-        run: git clone --depth 1 https://github.com/kdrag0n/proton-clang.git ~/proton-clang
+      - name: Download Neutron Clang (if cache miss)
+        if: steps.cache-neutron.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/neutron-clang
+          curl -L -o /tmp/neutron.tar.zst "https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/neutron-clang-17/neutron-clang-17.0.0-20241013.tar.zst"
+          zstd -d /tmp/neutron.tar.zst -o /tmp/neutron.tar
+          tar -xf /tmp/neutron.tar -C ~/neutron-clang
+          rm -f /tmp/neutron.tar.zst /tmp/neutron.tar
+
+      - name: Save Neutron Clang to cache
+        if: steps.cache-neutron.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/neutron-clang
+          key: neutron-clang-17-20250426
 
       - name: Set environment
         run: |
-          echo "TC_PATH=$HOME/proton-clang/bin" >> $GITHUB_ENV
+          echo "TC_PATH=$HOME/neutron-clang/bin" >> $GITHUB_ENV
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=$HOME/proton-clang/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
-          
-      - name: Cache AnyKernel3
-        id: cache-ak3
-        uses: actions/cache@v4
-        with:
-          path: ak3_src
-          key: anykernel3-20250126
+          echo "CROSS_COMPILE=$HOME/neutron-clang/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
 
-      - name: Download AnyKernel3 if not cached
-        if: steps.cache-ak3.outputs.cache-hit != 'true'
+      - name: Clone Eureka Kernel R15-OneUI
+        run: git clone --depth 1 https://github.com/eurekadevelopment/Eureka-Kernel -b R15-OneUI kernel_source
+
+      - name: Integrate KSU Next (no submodule method)
+        working-directory: kernel_source
         run: |
-          git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git ak3_src
-
-      - name: Get remote kernel commit hash
-        id: kernel-ref
-        run: |
-          HASH=$(git ls-remote https://github.com/eurekadevelopment/Eureka-Kernel.git refs/heads/R15-OneUI | awk '{print $1}')
-          echo "hash=$HASH" >> $GITHUB_OUTPUT
-
-      - name: Cache kernel source with KSU Next swapped
-        id: cache-kernel
-        uses: actions/cache@v4
-        with:
-          path: kernel_source
-          key: eureka-r15-oneui-${{ steps.kernel-ref.outputs.hash }}-ksu-next-${{ github.event.inputs.ksu_next_tag }}
-
-      - name: Prepare kernel source (only if cache miss)
-        if: steps.cache-kernel.outputs.cache-hit != 'true'
-        run: |
-          # Clone fresh
-          git clone --depth 1 --single-branch -b R15-OneUI https://github.com/eurekadevelopment/Eureka-Kernel kernel_source
-          cd kernel_source
-          # Remove stock KSU
-          if [ -d "KernelSU" ]; then
-            git submodule deinit -f KernelSU 2>/dev/null || true
-            rm -rf KernelSU
-          fi
-          rm -rf .git/modules/KernelSU 2>/dev/null || true
+          rm -rf KernelSU .git/modules/KernelSU
           git config --remove-section submodule.KernelSU 2>/dev/null || true
           git config -f .gitmodules --remove-section submodule.KernelSU 2>/dev/null || true
           git rm --cached -rf KernelSU 2>/dev/null || true
           rm -f .git/index.lock
-          # Add KSU Next (shallow, no full history)
-          git submodule add --depth 1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
+          git clone --depth 1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
           cd KernelSU
           git fetch --tags --depth 1
           git checkout tags/${{ github.event.inputs.ksu_next_tag }} 2>/dev/null || git checkout ${{ github.event.inputs.ksu_next_tag }}
-          cd ../..
-          
+          cd ..
+          bash KernelSU/tools/setup.sh
+
       - name: Configure kernel
         working-directory: kernel_source
         run: |
-          export PATH="$HOME/proton-clang/bin:$PATH"
+          export PATH="$HOME/neutron-clang/bin:$PATH"
           make ${{ github.event.inputs.device }} 2>/dev/null || {
             echo "Defconfig not found. Available:"
             ls arch/arm64/configs/ | grep -iE "exynos|a20|7884|7885|7904"
@@ -103,13 +85,13 @@ jobs:
           }
           if ! grep -q "CONFIG_KSU=y" .config; then
             echo "CONFIG_KSU=y" >> .config
-            make olddefconfig
           fi
+          make olddefconfig
 
       - name: Build kernel
         working-directory: kernel_source
         run: |
-          export PATH="$HOME/proton-clang/bin:$PATH"
+          export PATH="$HOME/neutron-clang/bin:$PATH"
           make -j$(nproc) 2>&1 | tee build.log
           ls -la arch/arm64/boot/
 
