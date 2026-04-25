@@ -47,15 +47,17 @@ jobs:
       - name: Clone Eureka Kernel R15-OneUI
         run: git clone https://github.com/eurekadevelopment/Eureka-Kernel -b R15-OneUI kernel_source
 
-      - name: Replace KSU with KSU Next
+            - name: Replace KSU with KSU Next
         working-directory: kernel_source
         run: |
           if [ -d "KernelSU" ]; then
             git submodule deinit -f KernelSU 2>/dev/null || true
-            rm -rf KernelSU .git/modules/KernelSU
+            rm -rf KernelSU
           fi
+          rm -rf .git/modules/KernelSU 2>/dev/null || true
+          git config --remove-section submodule.KernelSU 2>/dev/null || true
           git config -f .gitmodules --remove-section submodule.KernelSU 2>/dev/null || true
-          git rm --cached -f KernelSU 2>/dev/null || true
+          git rm --cached -rf KernelSU 2>/dev/null || true
           rm -f .git/index.lock
           git submodule add https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
           cd KernelSU
