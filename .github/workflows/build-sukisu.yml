@@ -1,0 +1,92 @@
+name: Build Eureka Kernel R15-OneUI with SukiSU Ultra
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+
+    steps:
+      - name: Checkout Eureka Kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: eurekadevelopment/Eureka-Kernel
+          ref: R15-OneUI
+          path: kernel
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git make gcc gcc-aarch64-linux-gnu flex bison bc libssl-dev device-tree-compiler python3 python3-pip zip cpio lz4
+
+      - name: Install Neutron Clang toolchain
+        run: |
+          curl -LO https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman
+          chmod +x antman
+          ./antman -S=10032024
+          ./antman --patch=glibc
+          echo "CLANG_DIR=$(pwd)/toolchains/neutron-clang" >> $GITHUB_ENV
+
+      - name: Patch defconfig for SukiSU Ultra
+        run: |
+          cd kernel
+          DEFCONFIG="arch/arm64/configs/exynos7885-a20_defconfig"
+
+          sed -i 's/^# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/' $DEFCONFIG
+          grep -q "CONFIG_KALLSYMS" $DEFCONFIG || echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
+          grep -q "CONFIG_KALLSYMS_ALL" $DEFCONFIG || echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
+          grep -q "CONFIG_KSU" $DEFCONFIG || echo "CONFIG_KSU=y" >> $DEFCONFIG
+          grep -q "CONFIG_KSU_MANUAL_HOOK" $DEFCONFIG || echo "CONFIG_KSU_MANUAL_HOOK=y" >> $DEFCONFIG
+
+          sed -i 's/^CONFIG_KPROBES=y/# CONFIG_KPROBES is not set/' $DEFCONFIG
+          sed -i 's/^CONFIG_KRETPROBES=y/# CONFIG_KRETPROBES is not set/' $DEFCONFIG
+          sed -i 's/^CONFIG_LTO=y/# CONFIG_LTO is not set/' $DEFCONFIG
+
+          grep -q "CONFIG_SIPHASH" $DEFCONFIG || echo "CONFIG_SIPHASH=y" >> $DEFCONFIG
+
+      - name: Set up SukiSU Ultra (nongki)
+        run: |
+          cd kernel
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s nongki
+
+      - name: Build kernel
+        run: |
+          cd kernel
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export ARCH=arm64
+          export CC=$CLANG_DIR/bin/clang
+          export LD=$CLANG_DIR/bin/ld.lld
+          export AR=$CLANG_DIR/bin/llvm-ar
+          export NM=$CLANG_DIR/bin/llvm-nm
+          export OBJCOPY=$CLANG_DIR/bin/llvm-objcopy
+          export OBJDUMP=$CLANG_DIR/bin/llvm-objdump
+          export STRIP=$CLANG_DIR/bin/llvm-strip
+
+          mkdir -p out
+          make O=out exynos7885-a20_defconfig
+          make O=out -j$(nproc) \
+            CC="$CC" \
+            LD="$LD" \
+            AR="$AR" \
+            NM="$NM" \
+            OBJCOPY="$OBJCOPY" \
+            OBJDUMP="$OBJDUMP" \
+            STRIP="$STRIP"
+
+      - name: Prepare AnyKernel3 package
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          cp kernel/out/arch/arm64/boot/Image.gz-dtb anykernel3/
+          cd anykernel3
+          zip -r9 "../Eureka-R15-OneUI-SukiSU-Ultra-$(date +%Y%m%d-%H%M).zip" *
+
+      - name: Upload kernel ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Eureka-Kernel-SukiSU-Ultra
+          path: "*.zip"
