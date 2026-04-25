@@ -72,7 +72,7 @@ jobs:
           git fetch --tags --depth 1
           git checkout tags/${{ github.event.inputs.ksu_next_tag }} 2>/dev/null || git checkout ${{ github.event.inputs.ksu_next_tag }}
           cd ..
-          bash KernelSU/tools/setup.sh
+          bash KernelSU/kernel/setup.sh
 
       - name: Configure kernel
         working-directory: kernel_source
