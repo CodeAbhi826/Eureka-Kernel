@@ -1,39 +1,32 @@
 > $GITHUB_ENV
 echo "ARCH=arm64" >> $GITHUB_ENV
-echo "KSU_TAG=${{ github.event.inputs.ksu_next_tag }}" >> $GITHUB_ENV
-echo "DEFCONFIG=${{ github.event.inputs.device }}" >> $GITHUB_ENV
-echo "CC=$HOME/proton-clang/bin/clang" >> $GITHUB_ENV
 echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
 echo "CROSS_COMPILE=$HOME/proton-clang/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
 
-name: Clone Eureka Kernel R15-OneUI source
-run: |
-git clone https://github.com/eurekadevelopment/Eureka-Kernel -b R15-OneUI kernel_source
-echo "KERNEL_SRC=$GITHUB_WORKSPACE/kernel_source" >> $GITHUB_ENV
+name: Clone Eureka Kernel R15-OneUI
+run: git clone https://github.com/eurekadevelopment/Eureka-Kernel -b R15-OneUI kernel_source
 
-name: Replace KernelSU submodule with KSU Next
+name: Replace KSU with KSU Next
 working-directory: kernel_source
 run: |
-Remove stock KernelSU
 if [ -d "KernelSU" ]; then
 git submodule deinit -f KernelSU 2>/dev/null || true
 rm -rf KernelSU .git/modules/KernelSU
 fi
 git config -f .gitmodules --remove-section submodule.KernelSU 2>/dev/null || true
 git rm --cached KernelSU 2>/dev/null || true
-Add KernelSU-Next
 git submodule add https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
 cd KernelSU
 git fetch --tags
-git checkout tags/${{ env.KSU_TAG }} 2>/dev/null || git checkout ${{ env.KSU_TAG }}
+git checkout tags/${{ github.event.inputs.ksu_next_tag }} 2>/dev/null || git checkout ${{ github.event.inputs.ksu_next_tag }}
 cd ..
 
-name: Select defconfig & enable KSU
+name: Configure kernel
 working-directory: kernel_source
 run: |
-export PATH="${{ env.TC_PATH }}:$PATH"
-make ${{ env.DEFCONFIG }} 2>/dev/null || {
-echo "Defconfig not found! Available ones:"
+export PATH="$HOME/proton-clang/bin:$PATH"
+make ${{ github.event.inputs.device }} 2>/dev/null || {
+echo "Defconfig not found. Available:"
 ls arch/arm64/configs/ | grep -iE "exynos|a20|7884|7885|7904"
 exit 1
 }
@@ -45,55 +38,43 @@ fi
 name: Build kernel
 working-directory: kernel_source
 run: |
-export PATH="${{ env.TC_PATH }}:$PATH"
+export PATH="$HOME/proton-clang/bin:$PATH"
 make -j$(nproc) 2>&1 | tee build.log
-Verify output
 ls -la arch/arm64/boot/
-if [ ! -f arch/arm64/boot/Image.gz-dtb ] && [ ! -f arch/arm64/boot/Image.gz ] && [ ! -f arch/arm64/boot/Image ]; then
-echo "BUILD FAILED — no kernel image found"
-exit 1
-fi
 
 name: Package with AnyKernel3
 run: |
-mkdir -p ak3_out/META-INF/com/google/android/
-mkdir -p ak3_out/tools/
-Download AnyKernel3 binary
+mkdir -p ak3_out/META-INF/com/google/android/ ak3_out/tools/
 TMP_AK3=$(mktemp -d)
-git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git $TMP_AK3
-cp $TMP_AK3/META-INF/com/google/android/update-binary ak3_out/META-INF/com/google/android/
-cp $TMP_AK3/tools/ak3-core ak3_out/tools/
-cp $TMP_AK3/tools/magiskboot ak3_out/tools/
-rm -rf $TMP_AK3
-Copy anykernel.sh from the repo
+git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git "$TMP_AK3"
+cp "$TMP_AK3/META-INF/com/google/android/update-binary" ak3_out/META-INF/com/google/android/
+cp "$TMP_AK3/tools/ak3-core" ak3_out/tools/
+cp "$TMP_AK3/tools/magiskboot" ak3_out/tools/
+rm -rf "$TMP_AK3"
 cp anykernel3/anykernel.sh ak3_out/
-Copy kernel image
 if [ -f kernel_source/arch/arm64/boot/Image.gz-dtb ]; then
 cp kernel_source/arch/arm64/boot/Image.gz-dtb ak3_out/
 elif [ -f kernel_source/arch/arm64/boot/Image.gz ]; then
 cp kernel_source/arch/arm64/boot/Image.gz ak3_out/
 elif [ -f kernel_source/arch/arm64/boot/Image ]; then
 cp kernel_source/arch/arm64/boot/Image ak3_out/
+else
+echo "No kernel image found!"
+exit 1
 fi
-Create ZIP
-ZIP_NAME="Eureka-R15-OneUI-KSU-Next-${{ env.KSU_TAG }}-${{ env.DEFCONFIG }}.zip"
-cd ak3_out
-zip -r9 "../$ZIP_NAME" ./*
-cd ..
-echo "ZIP_PATH=$GITHUB_WORKSPACE/$ZIP_NAME" >> $GITHUB_ENV
+ZIP_NAME="Eureka-R15-OneUI-KSU-Next-${{ github.event.inputs.ksu_next_tag }}-${{ github.event.inputs.device }}.zip"
+cd ak3_out && zip -r9 "../$ZIP_NAME" ./* && cd ..
 echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
 name: Upload kernel ZIP
 uses: actions/upload-artifact@v4
 with:
 name: ${{ env.ZIP_NAME }}
-path: ${{ env.ZIP_PATH }}
-retention-days: 30
+path: ${{ env.ZIP_NAME }}
 
 name: Upload build log
 if: always()
 uses: actions/upload-artifact@v4
 with:
-name: build-log-${{ env.KSU_TAG }}
+name: build-log
 path: kernel_source/build.log
-retention-days: 7
