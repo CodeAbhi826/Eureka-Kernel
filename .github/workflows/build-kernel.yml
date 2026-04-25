@@ -104,14 +104,16 @@ jobs:
           git add -A
           git commit -m "Purge KernelSU before adding KSU Next" || echo "No changes to commit"
 
-      - name: Add KernelSU-Next submodule
-        working-directory: ./kernel
+      - name: Add KernelSU Next submodule
         run: |
-          git submodule add https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next
-          cd KernelSU-Next
-          git fetch --tags --depth 1
-          git checkout tags/${{ github.event.inputs.ksu_next_tag }} 2>/dev/null || git checkout ${{ github.event.inputs.ksu_next_tag }}
-          cd ..
+          TAG="${{ github.event.inputs.ksu_tag }}"
+          echo "Using KernelSU Next tag: $TAG"
+          rm -rf KernelSU-Next
+          git submodule add --depth 1 --branch "$TAG" \
+          https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next || {
+          echo "ERROR: Failed to checkout tag $TAG — does it exist?"
+          exit 1
+          }
 
       - name: Run KernelSU-Next setup
         working-directory: ./kernel
