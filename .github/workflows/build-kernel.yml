@@ -56,6 +56,7 @@ jobs:
           fi
           git config -f .gitmodules --remove-section submodule.KernelSU 2>/dev/null || true
           git rm --cached -f KernelSU 2>/dev/null || true
+          rm -f .git/index.lock
           git submodule add https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
           cd KernelSU
           git fetch --tags
