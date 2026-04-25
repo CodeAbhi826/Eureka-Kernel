@@ -31,13 +31,13 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/neutron-clang
-          key: neutron-clang-17-20250426
+          key: neutron-clang-11032023
 
       - name: Download Neutron Clang (if cache miss)
         if: steps.cache-neutron.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/neutron-clang
-          curl -L -o /tmp/neutron.tar.zst "https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/neutron-clang-17/neutron-clang-17.0.0-20241013.tar.zst"
+          curl -L -o /tmp/neutron.tar.zst "https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/11032023/neutron-clang-11032023.tar.zst"
           zstd -d /tmp/neutron.tar.zst -o /tmp/neutron.tar
           tar -xf /tmp/neutron.tar -C ~/neutron-clang
           rm -f /tmp/neutron.tar.zst /tmp/neutron.tar
