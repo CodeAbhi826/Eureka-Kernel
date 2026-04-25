@@ -59,6 +59,7 @@ jobs:
 
       - name: Clone Eureka Kernel R15-OneUI
         run: |
+          rm -rf kernel
           git clone --depth 1 https://github.com/eurekadevelopment/Eureka-Kernel.git -b R15-OneUI kernel
           cd kernel
           git config user.name "github-actions"
