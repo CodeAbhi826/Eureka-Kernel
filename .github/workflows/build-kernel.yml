@@ -47,7 +47,7 @@ jobs:
       - name: Clone Eureka Kernel R15-OneUI
         run: git clone https://github.com/eurekadevelopment/Eureka-Kernel -b R15-OneUI kernel_source
 
-            - name: Replace KSU with KSU Next
+      - name: Replace KSU with KSU Next
         working-directory: kernel_source
         run: |
           if [ -d "KernelSU" ]; then
