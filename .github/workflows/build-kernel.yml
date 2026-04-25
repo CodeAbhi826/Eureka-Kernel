@@ -1,80 +1,121 @@
-> $GITHUB_ENV
-echo "ARCH=arm64" >> $GITHUB_ENV
-echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
-echo "CROSS_COMPILE=$HOME/proton-clang/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
+name: Build Eureka R15 OneUI + KSU Next
 
-name: Clone Eureka Kernel R15-OneUI
-run: git clone https://github.com/eurekadevelopment/Eureka-Kernel -b R15-OneUI kernel_source
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_next_tag:
+        description: 'KernelSU Next version tag (e.g. v1.1.1)'
+        required: true
+        default: 'v1.1.1'
+      device:
+        description: 'Device defconfig (exynos7885-a20_defconfig)'
+        required: true
+        default: 'exynos7885-a20_defconfig'
 
-name: Replace KSU with KSU Next
-working-directory: kernel_source
-run: |
-if [ -d "KernelSU" ]; then
-git submodule deinit -f KernelSU 2>/dev/null || true
-rm -rf KernelSU .git/modules/KernelSU
-fi
-git config -f .gitmodules --remove-section submodule.KernelSU 2>/dev/null || true
-git rm --cached KernelSU 2>/dev/null || true
-git submodule add https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
-cd KernelSU
-git fetch --tags
-git checkout tags/${{ github.event.inputs.ksu_next_tag }} 2>/dev/null || git checkout ${{ github.event.inputs.ksu_next_tag }}
-cd ..
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
 
-name: Configure kernel
-working-directory: kernel_source
-run: |
-export PATH="$HOME/proton-clang/bin:$PATH"
-make ${{ github.event.inputs.device }} 2>/dev/null || {
-echo "Defconfig not found. Available:"
-ls arch/arm64/configs/ | grep -iE "exynos|a20|7884|7885|7904"
-exit 1
-}
-if ! grep -q "CONFIG_KSU=y" .config; then
-echo "CONFIG_KSU=y" >> .config
-make olddefconfig
-fi
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-name: Build kernel
-working-directory: kernel_source
-run: |
-export PATH="$HOME/proton-clang/bin:$PATH"
-make -j$(nproc) 2>&1 | tee build.log
-ls -la arch/arm64/boot/
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git make zip device-tree-compiler gcc flex bison libssl-dev bc python3
 
-name: Package with AnyKernel3
-run: |
-mkdir -p ak3_out/META-INF/com/google/android/ ak3_out/tools/
-TMP_AK3=$(mktemp -d)
-git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git "$TMP_AK3"
-cp "$TMP_AK3/META-INF/com/google/android/update-binary" ak3_out/META-INF/com/google/android/
-cp "$TMP_AK3/tools/ak3-core" ak3_out/tools/
-cp "$TMP_AK3/tools/magiskboot" ak3_out/tools/
-rm -rf "$TMP_AK3"
-cp anykernel3/anykernel.sh ak3_out/
-if [ -f kernel_source/arch/arm64/boot/Image.gz-dtb ]; then
-cp kernel_source/arch/arm64/boot/Image.gz-dtb ak3_out/
-elif [ -f kernel_source/arch/arm64/boot/Image.gz ]; then
-cp kernel_source/arch/arm64/boot/Image.gz ak3_out/
-elif [ -f kernel_source/arch/arm64/boot/Image ]; then
-cp kernel_source/arch/arm64/boot/Image ak3_out/
-else
-echo "No kernel image found!"
-exit 1
-fi
-ZIP_NAME="Eureka-R15-OneUI-KSU-Next-${{ github.event.inputs.ksu_next_tag }}-${{ github.event.inputs.device }}.zip"
-cd ak3_out && zip -r9 "../$ZIP_NAME" ./* && cd ..
-echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+      - name: Cache Proton Clang
+        id: cache-tc
+        uses: actions/cache@v4
+        with:
+          path: ~/proton-clang
+          key: proton-clang-20241228
 
-name: Upload kernel ZIP
-uses: actions/upload-artifact@v4
-with:
-name: ${{ env.ZIP_NAME }}
-path: ${{ env.ZIP_NAME }}
+      - name: Clone Proton Clang
+        if: steps.cache-tc.outputs.cache-hit != 'true'
+        run: git clone --depth 1 https://github.com/kdrag0n/proton-clang.git ~/proton-clang
 
-name: Upload build log
-if: always()
-uses: actions/upload-artifact@v4
-with:
-name: build-log
-path: kernel_source/build.log
+      - name: Set environment
+        run: |
+          echo "TC_PATH=$HOME/proton-clang/bin" >> $GITHUB_ENV
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=$HOME/proton-clang/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
+
+      - name: Clone Eureka Kernel R15-OneUI
+        run: git clone https://github.com/eurekadevelopment/Eureka-Kernel -b R15-OneUI kernel_source
+
+      - name: Replace KSU with KSU Next
+        working-directory: kernel_source
+        run: |
+          if [ -d "KernelSU" ]; then
+            git submodule deinit -f KernelSU 2>/dev/null || true
+            rm -rf KernelSU .git/modules/KernelSU
+          fi
+          git config -f .gitmodules --remove-section submodule.KernelSU 2>/dev/null || true
+          git rm --cached KernelSU 2>/dev/null || true
+          git submodule add https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
+          cd KernelSU
+          git fetch --tags
+          git checkout tags/${{ github.event.inputs.ksu_next_tag }} 2>/dev/null || git checkout ${{ github.event.inputs.ksu_next_tag }}
+          cd ..
+
+      - name: Configure kernel
+        working-directory: kernel_source
+        run: |
+          export PATH="$HOME/proton-clang/bin:$PATH"
+          make ${{ github.event.inputs.device }} 2>/dev/null || {
+            echo "Defconfig not found. Available:"
+            ls arch/arm64/configs/ | grep -iE "exynos|a20|7884|7885|7904"
+            exit 1
+          }
+          if ! grep -q "CONFIG_KSU=y" .config; then
+            echo "CONFIG_KSU=y" >> .config
+            make olddefconfig
+          fi
+
+      - name: Build kernel
+        working-directory: kernel_source
+        run: |
+          export PATH="$HOME/proton-clang/bin:$PATH"
+          make -j$(nproc) 2>&1 | tee build.log
+          ls -la arch/arm64/boot/
+
+      - name: Package with AnyKernel3
+        run: |
+          mkdir -p ak3_out/META-INF/com/google/android/ ak3_out/tools/
+          TMP_AK3=$(mktemp -d)
+          git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git "$TMP_AK3"
+          cp "$TMP_AK3/META-INF/com/google/android/update-binary" ak3_out/META-INF/com/google/android/
+          cp "$TMP_AK3/tools/ak3-core" ak3_out/tools/
+          cp "$TMP_AK3/tools/magiskboot" ak3_out/tools/
+          rm -rf "$TMP_AK3"
+          cp anykernel3/anykernel.sh ak3_out/
+          if [ -f kernel_source/arch/arm64/boot/Image.gz-dtb ]; then
+            cp kernel_source/arch/arm64/boot/Image.gz-dtb ak3_out/
+          elif [ -f kernel_source/arch/arm64/boot/Image.gz ]; then
+            cp kernel_source/arch/arm64/boot/Image.gz ak3_out/
+          elif [ -f kernel_source/arch/arm64/boot/Image ]; then
+            cp kernel_source/arch/arm64/boot/Image ak3_out/
+          else
+            echo "No kernel image found!"
+            exit 1
+          fi
+          ZIP_NAME="Eureka-R15-OneUI-KSU-Next-${{ github.event.inputs.ksu_next_tag }}-${{ github.event.inputs.device }}.zip"
+          cd ak3_out && zip -r9 "../$ZIP_NAME" ./* && cd ..
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Upload kernel ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: kernel_source/build.log
