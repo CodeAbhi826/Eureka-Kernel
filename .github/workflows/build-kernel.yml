@@ -44,12 +44,26 @@ jobs:
           echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
           echo "CROSS_COMPILE=$HOME/proton-clang/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
 
-      - name: Clone Eureka Kernel R15-OneUI
-        run: git clone https://github.com/eurekadevelopment/Eureka-Kernel -b R15-OneUI kernel_source
-
-      - name: Replace KSU with KSU Next
-        working-directory: kernel_source
+      - name: Get remote kernel commit hash
+        id: kernel-ref
         run: |
+          HASH=$(git ls-remote https://github.com/eurekadevelopment/Eureka-Kernel.git refs/heads/R15-OneUI | awk '{print $1}')
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+
+      - name: Cache kernel source with KSU Next swapped
+        id: cache-kernel
+        uses: actions/cache@v4
+        with:
+          path: kernel_source
+          key: eureka-r15-oneui-${{ steps.kernel-ref.outputs.hash }}-ksu-next-${{ github.event.inputs.ksu_next_tag }}
+
+      - name: Prepare kernel source (only if cache miss)
+        if: steps.cache-kernel.outputs.cache-hit != 'true'
+        run: |
+          # Clone fresh
+          git clone --depth 1 --single-branch -b R15-OneUI https://github.com/eurekadevelopment/Eureka-Kernel kernel_source
+          cd kernel_source
+          # Remove stock KSU
           if [ -d "KernelSU" ]; then
             git submodule deinit -f KernelSU 2>/dev/null || true
             rm -rf KernelSU
@@ -59,12 +73,13 @@ jobs:
           git config -f .gitmodules --remove-section submodule.KernelSU 2>/dev/null || true
           git rm --cached -rf KernelSU 2>/dev/null || true
           rm -f .git/index.lock
-          git submodule add https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
+          # Add KSU Next (shallow, no full history)
+          git submodule add --depth 1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU
           cd KernelSU
-          git fetch --tags
+          git fetch --tags --depth 1
           git checkout tags/${{ github.event.inputs.ksu_next_tag }} 2>/dev/null || git checkout ${{ github.event.inputs.ksu_next_tag }}
-          cd ..
-
+          cd ../..
+          
       - name: Configure kernel
         working-directory: kernel_source
         run: |
