@@ -3,10 +3,35 @@ name: Build Eureka R15 OneUI + KSU Next
 on:
   workflow_dispatch:
     inputs:
-      ksu_next_tag:
-        description: 'KernelSU Next version (e.g. v1.1.1)'
+      ksu_tag:
+        description: 'KernelSU Next version tag'
+        type: choice
         required: true
         default: 'v1.1.1'
+        options:
+          # ── v3.x (latest) ──
+          - 'v3.2.0'
+          - 'v3.1.0'
+          - 'v3.0.1'
+          - 'v3.0.0'
+          # ── v3.x legacy ──
+          - 'v3.2.0-legacy'
+          - 'v3.1.0-legacy'
+          - 'v3.0.1-legacy'
+          - 'v3.0.0-legacy'
+          # ── v1.x ──
+          - 'v1.1.1'
+          - 'v1.1.0'
+          - 'v1.0.9'
+          - 'v1.0.8'
+          - 'v1.0.7'
+          - 'v1.0.6'
+          - 'v1.0.5'
+          - 'v1.0.4'
+          - 'v1.0.3'
+          - 'v1.0.2'
+          - 'v1.0.1'
+          - 'v1.0.0'
       device:
         description: 'Device defconfig'
         required: true
