@@ -97,7 +97,13 @@ jobs:
         run: |
           sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/ksu.c
           echo "Removed MODULE_IMPORT_NS line from ksu.c"
-      
+          
+      - name: Create stub compiler_types.h for 4.4 kernel
+        working-directory: ./kernel
+        run: |
+          echo "#include <linux/compiler.h>" > include/linux/compiler_types.h
+          echo "Stub created for compiler_types.h"
+          
       - name: Build kernel
         working-directory: ./kernel
         run: |
