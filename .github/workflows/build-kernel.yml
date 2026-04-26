@@ -191,16 +191,19 @@ jobs:
       # ─── Create the flashable ZIP ───
       - name: Create flashable ZIP
         run: |
+          BUILD_NO=$(printf "%03d" ${{ github.run_number }})
+          ZIP_NAME="skewkernel-${BUILD_NO}"
           cd anykernel
-          zip -r9 "../Eureka-R15-OneUI-KSUN-$(date +%Y%m%d-%H%M).zip" .
+          zip -r9 "../${ZIP_NAME}.zip" .
           cd ..
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
 
       # ─── Upload the ZIP ───
       - name: Upload kernel ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Eureka-Kernel-KSU-Next
-          path: Eureka-R15-OneUI-KSU-Next-*.zip
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}.zip
 
       - name: Upload build log
         if: always()
