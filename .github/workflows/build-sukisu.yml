@@ -92,7 +92,12 @@ jobs:
           cd kernel
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s v3.0
       # ── FIX ENDS HERE ──
-
+      - name: Remove GKI-only MODULE_IMPORT_NS (unsupported on 4.4)
+        working-directory: ./kernel
+        run: |
+          sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/ksu.c
+          echo "Removed MODULE_IMPORT_NS line from ksu.c"
+      
       - name: Build kernel
         working-directory: ./kernel
         run: |
