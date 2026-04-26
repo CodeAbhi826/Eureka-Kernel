@@ -186,19 +186,16 @@ jobs:
             echo "Using default AnyKernel3 anykernel.sh"
           fi
 
-      - name: Create flashable ZIP
+      - name: Set flashable ZIP name
         run: |
-          ZIP_NAME="Eureka-R15-OneUI-KSU-Next-${{ github.event.inputs.ksu_next_tag }}-${{ github.event.inputs.device }}.zip"
-          cd anykernel
-          zip -r9 "../${ZIP_NAME}" ./*
-          cd ..
+          ZIP_NAME="R15-OneUI-KSUN-${{ github.event.inputs.ksu_next_tag }}-${{ github.event.inputs.device }}"
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
 
       - name: Upload kernel ZIP
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
-          path: ${{ env.ZIP_NAME }}
+          path: anykernel/*
 
       - name: Upload build log
         if: always()
