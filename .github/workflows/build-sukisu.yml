@@ -55,30 +55,16 @@ jobs:
       - name: Patch defconfig for SukiSU Ultra
         working-directory: ./kernel
         run: |
-          DEFCONFIG="arch/arm64/configs/exynos7885-a20_defconfig"
+          rm -rf KernelSU
+          rm -f drivers/kernelsu
+          git checkout -- drivers/Makefile drivers/Kconfig
+          echo "Old KernelSU cleaned"
 
-          # Ensure required configs are present
-          grep -q "CONFIG_KALLSYMS=y" "$DEFCONFIG" || echo "CONFIG_KALLSYMS=y" >> "$DEFCONFIG"
-          grep -q "CONFIG_KALLSYMS_ALL=y" "$DEFCONFIG" || echo "CONFIG_KALLSYMS_ALL=y" >> "$DEFCONFIG"
-          grep -q "CONFIG_KSU=y" "$DEFCONFIG" || echo "CONFIG_KSU=y" >> "$DEFCONFIG"
-          grep -q "CONFIG_KSU_MANUAL_HOOK=y" "$DEFCONFIG" || echo "CONFIG_KSU_MANUAL_HOOK=y" >> "$DEFCONFIG"
-
-          # Disable KPROBES and LTO
-          sed -i 's/^CONFIG_KPROBES=y/# CONFIG_KPROBES is not set/' "$DEFCONFIG"
-          sed -i 's/^CONFIG_KRETPROBES=y/# CONFIG_KRETPROBES is not set/' "$DEFCONFIG"
-          sed -i 's/^CONFIG_LTO=y/# CONFIG_LTO is not set/' "$DEFCONFIG"
-
-          # Enable SIPHASH if missing
-          grep -q "CONFIG_SIPHASH=y" "$DEFCONFIG" || echo "CONFIG_SIPHASH=y" >> "$DEFCONFIG"
-
-          echo "=== Last 12 lines of $DEFCONFIG ==="
-          tail -12 "$DEFCONFIG"
-
-      - name: Set up SukiSU Ultra
+      - name: Set up SukiSU Ultra (non-GKI, builtin)
         run: |
           cd kernel
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s ${{ github.event.inputs.suki_mode }}
-
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          
       - name: Build kernel
         working-directory: ./kernel
         run: |
