@@ -163,20 +163,19 @@ jobs:
             fi
           done
 
-          # 8) Stub out selinux_state usage (internal struct, unsupported on 4.4)
+          # 8) Stub out selinux.c – selinux_state is internal on 4.4
           if grep -q 'selinux_state.enforcing' drivers/kernelsu/selinux/selinux.c 2>/dev/null; then
-            echo "Patching selinux.c → replacing with 4.4‑compatible stubs"
+            echo "Replacing selinux.c with 4.4 stub"
             cat > drivers/kernelsu/selinux/selinux.c << 'SEEOF'
-          /* SukiSU selinux stubs for kernel 4.4 – selinux_state is internal */
+          /* SukiSU selinux stubs for kernel 4.4 */
           #include <linux/kernel.h>
-          #include <linux/errno.h>
 
           static int fake_enforce = 1;
 
           void selinux_setenforce(int enforce)
           {
           	fake_enforce = !!enforce;
-          	pr_info("SukiSU: selinux enforce set to %d\\n", fake_enforce);
+          	pr_info("SukiSU: selinux enforce set to %d\n", fake_enforce);
           }
 
           int selinux_getenforce(void)
@@ -185,6 +184,25 @@ jobs:
           }
           SEEOF
             echo "selinux.c stubbed for 4.4"
+          fi
+
+          # 9) Stub out sepolicy.c – internal SELinux structs are incompatible with 4.4
+          if grep -q 'filename_trans_key' drivers/kernelsu/selinux/sepolicy.c 2>/dev/null; then
+            echo "Replacing sepolicy.c with 4.4 stub"
+            cat > drivers/kernelsu/selinux/sepolicy.c << 'SEPOL'
+          /* SukiSU sepolicy stubs for kernel 4.4 */
+          #include <linux/kernel.h>
+          #include <linux/slab.h>
+          #include <linux/string.h>
+          #include <linux/errno.h>
+
+          /* Minimal stubs – runtime SELinux policy overwrite is not supported on 4.4 */
+          int apply_sepolicy(const char *data, size_t size) { return 0; }
+          int reset_sepolicy(void) { return 0; }
+          int get_sepolicy(char **data, size_t *size) { return -ENOSYS; }
+          int set_sepolicy(const char *data, size_t size) { return -ENOSYS; }
+          SEPOL
+            echo "sepolicy.c replaced with stubs"
           fi
 
           echo "=== Compatibility fixes applied ==="
