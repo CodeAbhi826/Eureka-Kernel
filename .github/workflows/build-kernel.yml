@@ -205,11 +205,15 @@ jobs:
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
 
       # ─── Upload the ZIP ───
-      - name: Upload kernel ZIP
-        uses: actions/upload-artifact@v4
+      - name: Upload kernel ZIP to release
+        uses: softprops/action-gh-release@v1
         with:
-          name: ${{ env.ZIP_NAME }}
-          path: ${{ env.ZIP_NAME }}.zip
+          files: skewkernel-${{ env.BUILD_NO }}.zip
+          tag_name: latest
+          name: "Build #${{ github.run_number }}"
+          body: "Automated build from ${{ github.ref }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload build log
         if: always()
