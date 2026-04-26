@@ -142,9 +142,8 @@ jobs:
           make O=out ARCH=arm64 ${{ github.event.inputs.device }}
 
       - name: Verify KSU in config
-        working-directory: ./kernel
         run: |
-          grep -q "CONFIG_KSU=y" out/.config || { echo "ERROR: KernelSU not enabled!"; exit 1; }
+          grep -q "CONFIG_KSU=y" "${{ github.workspace }}/kernel/out/.config" || { echo "ERROR: KernelSU not enabled!"; exit 1; }
           echo "KernelSU config verified OK"
 
       - name: Build kernel
