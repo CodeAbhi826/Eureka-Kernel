@@ -192,7 +192,7 @@ jobs:
       - name: Create flashable ZIP
         run: |
           cd anykernel
-          zip -r9 "../Eureka-R15-OneUI-KSU-Next-$(date +%Y%m%d-%H%M).zip" .
+          zip -r9 "../Eureka-R15-OneUI-KSUN-$(date +%Y%m%d-%H%M).zip" .
           cd ..
 
       # ─── Upload the ZIP ───
