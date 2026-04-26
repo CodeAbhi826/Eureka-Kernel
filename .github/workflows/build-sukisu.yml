@@ -109,7 +109,7 @@ jobs:
         run: |
           echo "=== Pre‑build compatibility scan for 4.4 ==="
 
-          # 1) Remove any MODULE_IMPORT_NS (GKI‑only macro)
+          # 1) Remove GKI‑only MODULE_IMPORT_NS macro
           grep -rIl 'MODULE_IMPORT_NS' drivers/kernelsu/ | while read f; do
             echo "Purging MODULE_IMPORT_NS from $f"
             sed -i '/MODULE_IMPORT_NS/d' "$f"
@@ -131,7 +131,7 @@ jobs:
             fi
           done
 
-          # 3b) Replace <linux/sched/task.h> → <linux/sched.h>  (new – kernel_compat.c)
+          # 4) Replace <linux/sched/task.h> → <linux/sched.h>
           find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
             if grep -q '<linux/sched/task.h>' "$f"; then
               echo "Patching $f → sched/task.h → sched.h"
@@ -139,7 +139,7 @@ jobs:
             fi
           done
 
-          # 4) full_name_hash() – remove NULL salt for 2‑arg version
+          # 5) full_name_hash – remove NULL salt (4.4 has only 2 args)
           find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
             if grep -q 'full_name_hash(NULL' "$f"; then
               echo "Patching $f → full_name_hash (remove NULL salt)"
@@ -147,7 +147,7 @@ jobs:
             fi
           done
 
-          # 5) group_info->gid → GROUP_AT()
+          # 6) group_info->gid → GROUP_AT()  (4.4 compatibility)
           find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
             if grep -q 'group_info->gid\[' "$f"; then
               echo "Patching $f → group_info->gid → GROUP_AT"
@@ -155,7 +155,7 @@ jobs:
             fi
           done
 
-          # 6) security_add_hooks() – remove 3rd name arg
+          # 7) security_add_hooks – remove 3rd arg (4.4 compatibility)
           find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
             if grep -q 'security_add_hooks(' "$f"; then
               echo "Patching $f → security_add_hooks (remove 3rd arg)"
@@ -163,6 +163,15 @@ jobs:
             fi
           done
 
+          # 8) Declare extern selinux_state for 4.4
+          if grep -q 'selinux_state.enforcing' drivers/kernelsu/selinux/selinux.c 2>/dev/null; then
+            if ! grep -q 'extern struct selinux_state' drivers/kernelsu/selinux/selinux.c; then
+              echo "Declaring extern selinux_state for 4.4"
+              sed -i '1s/^/#include <linux\/selinux.h>\nextern struct selinux_state selinux_state;\n/' drivers/kernelsu/selinux/selinux.c
+            fi
+          fi
+
+          echo "=== Compatibility fixes applied ==="
       
            # 7) Declare selinux_state for 4.4 (extern, defined in security.h)
           if grep -q 'selinux_state.enforcing' drivers/kernelsu/selinux/selinux.c 2>/dev/null; then
