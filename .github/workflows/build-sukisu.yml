@@ -219,6 +219,45 @@ jobs:
             echo "rules.c replaced with stub"
           fi
           
+                    # 11) Provide stub definitions for SELinux‑related symbols (removed by stubs)
+          echo "Creating stubs for missing SELinux/trusted‑boot symbols"
+          cat > drivers/kernelsu/selinux/stubs.c << 'STUBEOF'
+          /* Symbol stubs for 4.4 kernel – these features are not supported */
+          #include <linux/kernel.h>
+          #include <linux/uaccess.h>
+
+          /* SELinux domain check – always return 0 (not in a KSU domain) */
+          int is_ksu_domain(void) { return 0; }
+
+          /* Credential getter – return NULL (no special creds) */
+          void *get_cred_rcu(void) { return NULL; }
+
+          /* SELinux setup – do nothing */
+          void setup_selinux(void) { }
+
+          /* SELinux policy handler – do nothing */
+          int handle_sepolicy(const char *data, size_t size) { return 0; }
+
+          /* Zygote check – return 0 (not zygote) */
+          int is_zygote(void) { return 0; }
+
+          /* path_umount backport – not supported, return error */
+          int path_umount(void *path, int flags) { return -ENOSYS; }
+
+          /* devpts SID getter – return 0 */
+          int ksu_get_devpts_sid(void) { return 0; }
+
+          /* SELinux rules application – do nothing */
+          int apply_kernelsu_rules(void) { return 0; }
+
+          /* strncpy_from_user_nofault – simple wrapper for 4.4 */
+          long strncpy_from_user_nofault(char *dst, const char __user *src, long count)
+          {
+                  return strncpy_from_user(dst, src, count);
+          }
+          STUBEOF
+          echo "Stub definitions created"
+          
           echo "=== Compatibility fixes applied ==="
       
            # 7) Declare selinux_state for 4.4 (extern, defined in security.h)
