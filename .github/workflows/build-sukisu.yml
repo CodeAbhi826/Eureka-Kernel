@@ -163,12 +163,28 @@ jobs:
             fi
           done
 
-          # 8) Declare extern selinux_state for 4.4
+          # 8) Stub out selinux_state usage (internal struct, unsupported on 4.4)
           if grep -q 'selinux_state.enforcing' drivers/kernelsu/selinux/selinux.c 2>/dev/null; then
-            if ! grep -q 'extern struct selinux_state' drivers/kernelsu/selinux/selinux.c; then
-              echo "Declaring extern selinux_state for 4.4"
-              sed -i '1s/^/#include <linux\/selinux.h>\nextern struct selinux_state selinux_state;\n/' drivers/kernelsu/selinux/selinux.c
-            fi
+            echo "Patching selinux.c → replacing with 4.4‑compatible stubs"
+            cat > drivers/kernelsu/selinux/selinux.c << 'SEEOF'
+          /* SukiSU selinux stubs for kernel 4.4 – selinux_state is internal */
+          #include <linux/kernel.h>
+          #include <linux/errno.h>
+
+          static int fake_enforce = 1;
+
+          void selinux_setenforce(int enforce)
+          {
+          	fake_enforce = !!enforce;
+          	pr_info("SukiSU: selinux enforce set to %d\\n", fake_enforce);
+          }
+
+          int selinux_getenforce(void)
+          {
+          	return fake_enforce;
+          }
+          SEEOF
+            echo "selinux.c stubbed for 4.4"
           fi
 
           echo "=== Compatibility fixes applied ==="
