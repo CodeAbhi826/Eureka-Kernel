@@ -1,99 +1,38 @@
-<BDS:create_file fileName="README.md" content="# Eureka R15 OneUI + KernelSU Next — GitHub Actions Kernel Builder
+# AnyKernel3 for Galaxy A20 (Exynos 7885)
+# osm0sis @ xda-developers
 
-This repo automatically builds a TWRP-flashable Eureka Kernel R15 OneUI with KernelSU Next baked in — all on GitHub's servers. No local toolchain needed.
-🚀 How to Use (3 steps)
-1. Fork this repo / push these files to your own GitHub repo
-2. Trigger the build
-Go to the Actions tab of your repo
+properties() { '
+kernel.string=skewkernel
+do.devicecheck=1
+do.modules=0
+do.systemless=1
+do.cleanup=1
+do.cleanuponabort=0
+device.name1=r0s
+device.name2=a20
+device.name3=a20lte
+device.name4=a205f
+device.name5=a20e
+device.name6=essi
+'; }
 
-Select "Build Eureka R15 OneUI + KSU Next" from the left sidebar
+# Auto-detect boot block (lowercase boot works on your device)
+if [ -e /dev/block/platform/13500000.dwmmc0/by-name/boot ]; then
+	block=/dev/block/platform/13500000.dwmmc0/by-name/boot;
+else
+	block=/dev/block/platform/13500000.dwmmc0/by-name/BOOT;
+fi
 
-Click the "Run workflow" button
+is_slot_device=0;
+ramdisk_compression=auto;
 
-Choose options:
-KernelSU Next version: v1.1.1
-, v1.2.0
-, etc. (check tags here)
+. tools/ak3-core.sh;
 
-Device defconfig: exynos7885-a20_defconfig
- (for Galaxy A20), or browse the options below
+split_boot;
+flash_boot;
+flash_dtb;
+flash_dtbo;
 
-
-Click Run workflow
-
-3. Download your kernel
-Wait ~20-40 minutes
-
-When the workflow finishes (✅ green), click into it
-
-Scroll down to Artifacts → download the .zip
-
-
-Flash it in TWRP
-
-📱 Supported Defconfigs (Device)
-
-
-
-
-
-DeviceDefconfigGalaxy A10exynos7884B-a10_defconfig
-Galaxy A20exynos7885-a20_defconfig
-Galaxy A20eexynos7885-a20e_defconfig
-Galaxy A30exynos7904-a30_defconfig
-Galaxy A30sexynos7904-a30s_defconfig
-Galaxy A40exynos7904-a40_defconfig
-Galaxy A7 (2018)exynos7885-a7y18lte_defconfig
-Galaxy A8 (2018)exynos7885-a8y18lte_defconfig
-
-(If the exact defconfig name differs, the build log will list available options.)
-📦 What You Get
-A flashable .zip
- containing:
-Eureka Kernel R15 OneUI (Linux 4.4.x, upstreamed)
-
-KernelSU Next (user-specified version)
-
-AnyKernel3 — flashes cleanly without touching your ramdisk
-
-🛡️ Before Flashing
-In TWRP Terminal, back up your current boot:
-bash
-
-Copy
-
-Download
-
-
-
-
-
-dd if=/dev/block/by-name/BOOT of=/sdcard/boot-backup.img
-
-If bootloop: restore with dd if=/sdcard/boot-backup.img of=/dev/block/by-name/BOOT
-.
-🔁 Customizing
-Edit .github/workflows/build-kernel.yml
- to change Proton Clang version, add patches, or switch to GCC.
-
-Edit anykernel3/anykernel.sh
- to adjust device detection or block path.
-
-The workflow runs on workflow_dispatch
- — fully manual, no automatic triggers.
-
-⚠️ Caveats
-One UI 6.0 port ROMs may include ROM-specific kernel patches not present in upstream Eureka. Test and be ready to restore your backup.
-
-GitHub Actions has a 120-minute timeout — kernel builds usually finish in ~30 min.
-
-Artifacts expire after 30 days (GitHub's default). Re-run to rebuild.
-
-📜 Credits
-Eureka Kernel by eurekadevelopment
-
-KernelSU Next by KernelSU-Next
-
-AnyKernel3 by osm0sis
-
-Proton Clang by kdrag0n
+# copy extra files
+cp /tmp/anykernel/tools/espectrum.zip /data/media/0/enable_spectrum_support.zip 2>/dev/null;
+cp /tmp/anykernel/tools/changelog.txt /data/media/0/changelog.txt 2>/dev/null;
