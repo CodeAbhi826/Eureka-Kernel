@@ -296,7 +296,7 @@ jobs:
       - name: Upload kernel ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: sukesu-kernel-${{ env.ZIP_NAME }}
+          name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_NAME }}.zip
 
       - name: Upload build log
