@@ -1,7 +1,16 @@
-name: Build Eureka Kernel R15-OneUI with SukiSU Ultra
+name: Build Eureka R15-OneUI + SukiSU Ultra
 
 on:
   workflow_dispatch:
+    inputs:
+      suki_mode:
+        description: 'SukiSU install mode'
+        type: choice
+        required: true
+        default: 'nongki'
+        options:
+          - 'nongki'
+          - 'gki'
 
 jobs:
   build:
@@ -19,74 +28,106 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y git make gcc gcc-aarch64-linux-gnu flex bison bc libssl-dev device-tree-compiler python3 python3-pip zip cpio lz4
+          sudo apt update
+          sudo apt install -y bc bison flex libssl-dev make git python3 cpio gcc-aarch64-linux-gnu
 
-      - name: Install Neutron Clang toolchain
+      - name: Set up Neutron Clang toolchain
         run: |
-          curl -LO https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman
-          chmod +x antman
-          ./antman -S=10032024
-          ./antman --patch=glibc
-          echo "CLANG_DIR=$(pwd)/toolchains/neutron-clang" >> $GITHUB_ENV
+          mkdir -p toolchain
+          cd toolchain
+          bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") -S=10032024
+          bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
+          cd ..
+          echo "$(pwd)/toolchain/bin" >> $GITHUB_PATH
+
+      - name: Set build environment variables
+        run: |
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "LD=ld.lld" >> $GITHUB_ENV
+          echo "AR=llvm-ar" >> $GITHUB_ENV
+          echo "NM=llvm-nm" >> $GITHUB_ENV
+          echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
+          echo "OBJDUMP=llvm-objdump" >> $GITHUB_ENV
+          echo "STRIP=llvm-strip" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "ARCH=arm64" >> $GITHUB_ENV
 
       - name: Patch defconfig for SukiSU Ultra
+        working-directory: ./kernel
         run: |
-          cd kernel
           DEFCONFIG="arch/arm64/configs/exynos7885-a20_defconfig"
 
-          sed -i 's/^# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/' $DEFCONFIG
-          grep -q "CONFIG_KALLSYMS" $DEFCONFIG || echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
-          grep -q "CONFIG_KALLSYMS_ALL" $DEFCONFIG || echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
-          grep -q "CONFIG_KSU" $DEFCONFIG || echo "CONFIG_KSU=y" >> $DEFCONFIG
-          grep -q "CONFIG_KSU_MANUAL_HOOK" $DEFCONFIG || echo "CONFIG_KSU_MANUAL_HOOK=y" >> $DEFCONFIG
+          # Ensure required configs are present
+          grep -q "CONFIG_KALLSYMS=y" "$DEFCONFIG" || echo "CONFIG_KALLSYMS=y" >> "$DEFCONFIG"
+          grep -q "CONFIG_KALLSYMS_ALL=y" "$DEFCONFIG" || echo "CONFIG_KALLSYMS_ALL=y" >> "$DEFCONFIG"
+          grep -q "CONFIG_KSU=y" "$DEFCONFIG" || echo "CONFIG_KSU=y" >> "$DEFCONFIG"
+          grep -q "CONFIG_KSU_MANUAL_HOOK=y" "$DEFCONFIG" || echo "CONFIG_KSU_MANUAL_HOOK=y" >> "$DEFCONFIG"
 
-          sed -i 's/^CONFIG_KPROBES=y/# CONFIG_KPROBES is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_KRETPROBES=y/# CONFIG_KRETPROBES is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_LTO=y/# CONFIG_LTO is not set/' $DEFCONFIG
+          # Disable KPROBES and LTO
+          sed -i 's/^CONFIG_KPROBES=y/# CONFIG_KPROBES is not set/' "$DEFCONFIG"
+          sed -i 's/^CONFIG_KRETPROBES=y/# CONFIG_KRETPROBES is not set/' "$DEFCONFIG"
+          sed -i 's/^CONFIG_LTO=y/# CONFIG_LTO is not set/' "$DEFCONFIG"
 
-          grep -q "CONFIG_SIPHASH" $DEFCONFIG || echo "CONFIG_SIPHASH=y" >> $DEFCONFIG
+          # Enable SIPHASH if missing
+          grep -q "CONFIG_SIPHASH=y" "$DEFCONFIG" || echo "CONFIG_SIPHASH=y" >> "$DEFCONFIG"
 
-      - name: Set up SukiSU Ultra (nongki)
+          echo "=== Last 12 lines of $DEFCONFIG ==="
+          tail -12 "$DEFCONFIG"
+
+      - name: Set up SukiSU Ultra
         run: |
           cd kernel
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s nongki
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s ${{ github.event.inputs.suki_mode }}
 
       - name: Build kernel
+        working-directory: ./kernel
         run: |
-          cd kernel
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export ARCH=arm64
-          export CC=$CLANG_DIR/bin/clang
-          export LD=$CLANG_DIR/bin/ld.lld
-          export AR=$CLANG_DIR/bin/llvm-ar
-          export NM=$CLANG_DIR/bin/llvm-nm
-          export OBJCOPY=$CLANG_DIR/bin/llvm-objcopy
-          export OBJDUMP=$CLANG_DIR/bin/llvm-objdump
-          export STRIP=$CLANG_DIR/bin/llvm-strip
+          make O=out ARCH=arm64 exynos7885-a20_defconfig
+          make -j$(nproc) O=out ARCH=arm64 \
+            CC=${CC} LD=${LD} AR=${AR} NM=${NM} \
+            OBJCOPY=${OBJCOPY} OBJDUMP=${OBJDUMP} STRIP=${STRIP} \
+            CROSS_COMPILE=${CROSS_COMPILE} 2>&1 | tee build.log
 
-          mkdir -p out
-          make O=out exynos7885-a20_defconfig
-          make O=out -j$(nproc) \
-            CC="$CC" \
-            LD="$LD" \
-            AR="$AR" \
-            NM="$NM" \
-            OBJCOPY="$OBJCOPY" \
-            OBJDUMP="$OBJDUMP" \
-            STRIP="$STRIP"
+      - name: Check build output
+        run: |
+          echo "=== Build output ==="
+          ls -la kernel/out/arch/arm64/boot/
+          if [ ! -f kernel/out/arch/arm64/boot/Image ]; then
+            echo "ERROR: No kernel image produced!"
+            exit 1
+          fi
 
       - name: Prepare AnyKernel3 package
         run: |
-          cd "$GITHUB_WORKSPACE"
-          cp kernel/out/arch/arm64/boot/Image.gz-dtb anykernel3/
-          cd anykernel3
-          zip -r9 "../Eureka-R15-OneUI-SukiSU-Ultra-$(date +%Y%m%d-%H%M).zip" *
+          cp -r kernel/kernel_zip/anykernel anykernel
+          cp kernel/out/arch/arm64/boot/Image anykernel/
+
+      - name: Inject custom anykernel.sh (if available)
+        run: |
+          if [ -f "anykernel3/anykernel.sh" ]; then
+            cp anykernel3/anykernel.sh anykernel/
+            echo "Custom anykernel.sh injected"
+          else
+            echo "Using default anykernel.sh from kernel source"
+          fi
+
+      - name: Create flashable ZIP
+        run: |
+          BUILD_NO=$(printf "%03d" ${{ github.run_number }})
+          ZIP_NAME="sukisu-kernel-${BUILD_NO}"
+          cd anykernel
+          zip -r9 "../${ZIP_NAME}.zip" .
+          cd ..
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
 
       - name: Upload kernel ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Eureka-Kernel-SukiSU-Ultra
-          path: "*.zip"
+          name: sukesu-kernel-${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}.zip
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-sukisu-${{ env.ZIP_NAME }}
+          path: kernel/build.log
