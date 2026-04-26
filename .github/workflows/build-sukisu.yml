@@ -293,14 +293,14 @@ jobs:
           cd ..
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
 
-      - name: Upload kernel ZIP
-        uses: actions/upload-artifact@v4
+      - name: Upload kernel to GitHub Release
+        uses: softprops/action-gh-release@v1
         with:
-          name: ${{ env.ZIP_NAME }}
-          path: ${{ env.ZIP_NAME }}.zip
-
-      - name: Upload build log
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log-sukisu-${{ env.ZIP_NAME }}
-          path: kernel/build.log
+          files: |
+            ${{ env.ZIP_NAME }}.zip
+            kernel/build.log
+          tag_name: sukisu-latest
+          name: "SukiSU Build #${{ github.run_number }}"
+          body: "Automated SukiSU Ultra build from ${{ github.ref }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
