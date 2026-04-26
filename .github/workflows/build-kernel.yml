@@ -104,20 +104,21 @@ jobs:
           git add -A
           git commit -m "Purge KernelSU before adding KSU Next" || echo "No changes to commit"
 
-      - name: Add KernelSU Next submodule (tag support)
+      - name: Clone KernelSU Next (selected tag)
         run: |
           TAG="${{ github.event.inputs.ksu_tag }}"
           echo "Using KernelSU Next tag: $TAG"
           rm -rf KernelSU-Next
-          git submodule add https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next
-          git -C KernelSU-Next fetch --depth 1 origin tag "$TAG"
-          git -C KernelSU-Next checkout "$TAG"
+          git clone --depth 1 --branch "$TAG" \
+            https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next || {
+              echo "ERROR: Failed to clone tag $TAG"
+              exit 1
+            }
 
-      - name: Run KernelSU-Next setup
-        working-directory: ./kernel
+      - name: Run KernelSU Next setup
         run: |
-          chmod +x KernelSU-Next/kernel/setup.sh
-          ./KernelSU-Next/kernel/setup.sh
+          cd KernelSU-Next/kernel
+          bash setup.sh
 
       - name: Patch defconfig for KernelSU
         working-directory: ./kernel
