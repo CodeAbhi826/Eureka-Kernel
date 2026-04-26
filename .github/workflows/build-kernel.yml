@@ -166,36 +166,41 @@ jobs:
             exit 1
           fi
 
+      # ─── Setup AnyKernel3 (from kernel source) ───
       - name: Setup AnyKernel3
         run: |
-          git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git anykernel
-          rm -rf anykernel/.git anykernel/README.md anykernel/LICENSE 2>/dev/null || true
+          cp -r kernel/kernel_zip/anykernel anykernel
 
+      # ─── Copy the built kernel image ───
       - name: Copy kernel image to AnyKernel3
         run: |
-          cp kernel/out/arch/arm64/boot/Image.gz-dtb anykernel/ || \
+          cp kernel/out/arch/arm64/boot/Image anykernel/ || \
           cp kernel/out/arch/arm64/boot/Image.gz anykernel/ || \
-          cp kernel/out/arch/arm64/boot/Image anykernel/
+          cp kernel/out/arch/arm64/boot/Image.gz-dtb anykernel/
 
+      # (Optional) Overwrite anykernel.sh with your custom version
       - name: Inject custom anykernel.sh
         run: |
           if [ -f "anykernel3/anykernel.sh" ]; then
             cp anykernel3/anykernel.sh anykernel/
             echo "Custom anykernel.sh injected"
           else
-            echo "Using default AnyKernel3 anykernel.sh"
+            echo "Using default anykernel.sh from kernel source"
           fi
 
-      - name: Set flashable ZIP name
+      # ─── Create the flashable ZIP ───
+      - name: Create flashable ZIP
         run: |
-          ZIP_NAME="R15-OneUI-KSUN-${{ github.event.inputs.ksu_next_tag }}-${{ github.event.inputs.device }}"
-          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          cd anykernel
+          zip -r9 "../Eureka-R15-OneUI-KSU-Next-$(date +%Y%m%d-%H%M).zip" .
+          cd ..
 
+      # ─── Upload the ZIP ───
       - name: Upload kernel ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
-          path: anykernel/*
+          name: Eureka-Kernel-KSU-Next
+          path: Eureka-R15-OneUI-KSU-Next-*.zip
 
       - name: Upload build log
         if: always()
