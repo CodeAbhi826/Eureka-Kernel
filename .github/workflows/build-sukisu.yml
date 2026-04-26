@@ -123,21 +123,39 @@ jobs:
             fi
           fi
 
-          # 3) Warn about sucompat PT_REGS_PARM1 issue (4.4 may lack 'real_regs')
-          if grep -q 'PT_REGS_PARM1(real_regs)' drivers/kernelsu/sucompat.c 2>/dev/null; then
-            echo "WARNING: sucompat.c uses PT_REGS_PARM1(real_regs) – may fail on 4.4"
-            echo "If build fails, we'll need a patch for sucompat.c"
-          fi
-
-          # 4) Check for missing sched/task_stack.h (use sched.h on <=4.11)
+          # 3) Replace <linux/sched/task_stack.h> with <linux/sched.h> (4.4 fix)
           find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
             if grep -q '<linux/sched/task_stack.h>' "$f"; then
-              echo "Replacing task_stack.h with sched.h in $f"
+              echo "Patching $f → task_stack.h → sched.h"
               sed -i 's|<linux/sched/task_stack.h>|<linux/sched.h>|g' "$f"
             fi
           done
 
-          echo "=== Compatibility checks complete ==="
+          # 4) Fix full_name_hash() – 4.4 takes only 2 args (no salt)
+          find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
+            if grep -q 'full_name_hash(NULL' "$f"; then
+              echo "Patching $f → full_name_hash (remove NULL salt)"
+              sed -i 's/full_name_hash(NULL, \([^,]*\), strlen([^)]*))/full_name_hash((const unsigned char *)\1, strlen(\1))/g' "$f"
+            fi
+          done
+
+          # 5) Fix struct group_info – use GROUP_AT() macro instead of →gid[]
+          find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
+            if grep -q 'group_info->gid\[' "$f"; then
+              echo "Patching $f → group_info->gid → GROUP_AT"
+              sed -i 's/group_info->gid\[\([^]]*\)\]/GROUP_AT(group_info, \1)/g' "$f"
+            fi
+          done
+
+          # 6) Fix security_add_hooks() – 4.4 takes only 2 args (no 'name' string)
+          find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
+            if grep -q 'security_add_hooks(' "$f"; then
+              echo "Patching $f → security_add_hooks (remove 3rd arg)"
+              sed -i 's/security_add_hooks(\([^,]*\), \([^,]*\), "[^"]*")/security_add_hooks(\1, \2)/g' "$f"
+            fi
+          done
+
+          echo "=== Compatibility fixes applied ==="
           
       - name: Build kernel
         working-directory: ./kernel
