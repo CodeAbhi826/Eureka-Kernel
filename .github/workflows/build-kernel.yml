@@ -118,7 +118,7 @@ jobs:
       - name: Run KernelSU Next setup
         run: |
           cd kernel
-          bash ../KernelSU-Next/kernel/setup.sh
+          bash ../KernelSU-Next/kernel/setup.sh ${{ github.event.inputs.ksu_tag }}
 
       - name: Patch defconfig for KernelSU
         working-directory: ./kernel
@@ -141,6 +141,14 @@ jobs:
         run: |
           make O=out ARCH=arm64 ${{ github.event.inputs.device }}
 
+      - name: Debug – show KSU config
+        working-directory: ./kernel
+        run: |
+          echo "=== Does .config exist? ==="
+          test -f out/.config && echo "YES" || echo "NO"
+          echo "=== Lines containing KSU ==="
+          grep -i ksu out/.config || echo "No KSU lines found"
+          
       - name: Verify KSU in config
         run: |
           grep -q "CONFIG_KSU=y" "${{ github.workspace }}/kernel/out/.config" || { echo "ERROR: KernelSU not enabled!"; exit 1; }
