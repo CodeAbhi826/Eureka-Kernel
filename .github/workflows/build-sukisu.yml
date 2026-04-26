@@ -78,23 +78,19 @@ jobs:
       - name: Purge previous KernelSU hooks & revert source patches
         working-directory: ./kernel
         run: |
-          # Remove any leftover KernelSU folder / symlink
           rm -rf KernelSU
           rm -f drivers/kernelsu
-
-          # Revert kernel source files that were patched by KSU‑Next
           git checkout -- drivers/Makefile drivers/Kconfig \
             fs/open.c fs/read_write.c fs/stat.c fs/exec.c \
             fs/namespace.c fs/internal.h \
             drivers/input/input.c \
             include/linux/seccomp.h
+          echo "Old hooks reverted"
 
-          echo "Old KernelSU and source patches reverted"
-
-      - name: Set up SukiSU Ultra (non‑GKI, legacy manual hooks)
+      - name: Set up SukiSU Ultra v3.0 (non‑GKI, manual hooks)
         run: |
           cd kernel
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s old
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s v3.0
       # ── FIX ENDS HERE ──
 
       - name: Build kernel
