@@ -219,44 +219,26 @@ jobs:
             echo "rules.c replaced with stub"
           fi
           
-                    # 11) Provide stub definitions for SELinux‑related symbols (removed by stubs)
-          echo "Creating stubs for missing SELinux/trusted‑boot symbols"
-          cat > drivers/kernelsu/selinux/stubs.c << 'STUBEOF'
-          /* Symbol stubs for 4.4 kernel – these features are not supported */
-          #include <linux/kernel.h>
+          # 11) Append missing symbol stubs to the already‑compiled selinux.c stub
+          if grep -q 'selinux_setenforce' drivers/kernelsu/selinux/selinux.c 2>/dev/null; then
+            echo "Appending missing SELinux / trust‑boot symbol stubs to selinux.c"
+            cat >> drivers/kernelsu/selinux/selinux.c << 'ADDON'
+          /* ── additional stubs for 4.4 linker compatibility ── */
           #include <linux/uaccess.h>
 
-          /* SELinux domain check – always return 0 (not in a KSU domain) */
-          int is_ksu_domain(void) { return 0; }
-
-          /* Credential getter – return NULL (no special creds) */
-          void *get_cred_rcu(void) { return NULL; }
-
-          /* SELinux setup – do nothing */
-          void setup_selinux(void) { }
-
-          /* SELinux policy handler – do nothing */
-          int handle_sepolicy(const char *data, size_t size) { return 0; }
-
-          /* Zygote check – return 0 (not zygote) */
-          int is_zygote(void) { return 0; }
-
-          /* path_umount backport – not supported, return error */
-          int path_umount(void *path, int flags) { return -ENOSYS; }
-
-          /* devpts SID getter – return 0 */
-          int ksu_get_devpts_sid(void) { return 0; }
-
-          /* SELinux rules application – do nothing */
-          int apply_kernelsu_rules(void) { return 0; }
-
-          /* strncpy_from_user_nofault – simple wrapper for 4.4 */
-          long strncpy_from_user_nofault(char *dst, const char __user *src, long count)
-          {
-                  return strncpy_from_user(dst, src, count);
-          }
-          STUBEOF
-          echo "Stub definitions created"
+          int  is_ksu_domain(void)           { return 0; }
+          void *get_cred_rcu(void)           { return NULL; }
+          void setup_selinux(void)           { }
+          int  handle_sepolicy(void)         { return 0; }
+          int  is_zygote(void)               { return 0; }
+          int  path_umount(void *p, int f)   { return -ENOSYS; }
+          int  ksu_get_devpts_sid(void)      { return 0; }
+          int  apply_kernelsu_rules(void)    { return 0; }
+          long strncpy_from_user_nofault(char *d, const char __user *s, long n)
+          { return strncpy_from_user(d, s, n); }
+          ADDON
+            echo "Missing symbols appended to selinux.c"
+          fi
           
           echo "=== Compatibility fixes applied ==="
       
