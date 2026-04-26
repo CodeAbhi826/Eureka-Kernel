@@ -117,8 +117,8 @@ jobs:
 
       - name: Run KernelSU Next setup
         run: |
-          cd KernelSU-Next/kernel
-          bash setup.sh
+          cd kernel
+          bash KernelSU-Next/kernel/setup.sh
 
       - name: Patch defconfig for KernelSU
         working-directory: ./kernel
