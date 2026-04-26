@@ -115,7 +115,7 @@ jobs:
             sed -i '/MODULE_IMPORT_NS/d' "$f"
           done
 
-          # 2) Stub <linux/compiler_types.h> if any file includes it
+          # 2) Stub <linux/compiler_types.h>
           if grep -rq '<linux/compiler_types.h>' drivers/kernelsu/; then
             if ! grep -q 'compiler_types' include/linux/compiler_types.h 2>/dev/null; then
               echo '#include <linux/compiler.h>' > include/linux/compiler_types.h
@@ -123,7 +123,7 @@ jobs:
             fi
           fi
 
-          # 3) Replace <linux/sched/task_stack.h> with <linux/sched.h> (4.4 fix)
+          # 3) Replace <linux/sched/task_stack.h> → <linux/sched.h>
           find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
             if grep -q '<linux/sched/task_stack.h>' "$f"; then
               echo "Patching $f → task_stack.h → sched.h"
@@ -131,7 +131,15 @@ jobs:
             fi
           done
 
-          # 4) Fix full_name_hash() – 4.4 takes only 2 args (no salt)
+          # 3b) Replace <linux/sched/task.h> → <linux/sched.h>  (new – kernel_compat.c)
+          find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
+            if grep -q '<linux/sched/task.h>' "$f"; then
+              echo "Patching $f → sched/task.h → sched.h"
+              sed -i 's|<linux/sched/task.h>|<linux/sched.h>|g' "$f"
+            fi
+          done
+
+          # 4) full_name_hash() – remove NULL salt for 2‑arg version
           find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
             if grep -q 'full_name_hash(NULL' "$f"; then
               echo "Patching $f → full_name_hash (remove NULL salt)"
@@ -139,7 +147,7 @@ jobs:
             fi
           done
 
-          # 5) Fix struct group_info – use GROUP_AT() macro instead of →gid[]
+          # 5) group_info->gid → GROUP_AT()
           find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
             if grep -q 'group_info->gid\[' "$f"; then
               echo "Patching $f → group_info->gid → GROUP_AT"
@@ -147,7 +155,7 @@ jobs:
             fi
           done
 
-          # 6) Fix security_add_hooks() – 4.4 takes only 2 args (no 'name' string)
+          # 6) security_add_hooks() – remove 3rd name arg
           find drivers/kernelsu/ -name '*.c' -o -name '*.h' | while read f; do
             if grep -q 'security_add_hooks(' "$f"; then
               echo "Patching $f → security_add_hooks (remove 3rd arg)"
