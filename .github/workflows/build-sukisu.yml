@@ -163,8 +163,7 @@ jobs:
             fi
           done
 
-          echo "=== Compatibility fixes applied ==="
-
+      
            # 7) Declare selinux_state for 4.4 (extern, defined in security.h)
           if grep -q 'selinux_state.enforcing' drivers/kernelsu/selinux/selinux.c 2>/dev/null; then
             if ! grep -q 'extern struct selinux_state selinux_state' drivers/kernelsu/selinux/selinux.c; then
@@ -172,7 +171,9 @@ jobs:
               sed -i '/#include <linux\/.*>/a extern struct selinux_state selinux_state;' drivers/kernelsu/selinux/selinux.c
             fi
           fi
-          
+             
+             echo "=== Compatibility fixes applied ==="
+             
       - name: Build kernel
         working-directory: ./kernel
         run: |
