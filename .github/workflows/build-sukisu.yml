@@ -205,6 +205,20 @@ jobs:
             echo "sepolicy.c replaced with stubs"
           fi
 
+          # 10) Stub out rules.c – uses internal selinux_state struct (4.4 incompatible)
+          if grep -q 'selinux_state' drivers/kernelsu/selinux/rules.c 2>/dev/null; then
+            echo "Replacing rules.c with 4.4 stub"
+            cat > drivers/kernelsu/selinux/rules.c << 'RULESEOF'
+          /* SukiSU rules stubs for kernel 4.4 */
+          #include <linux/kernel.h>
+
+          int ksu_init_rules(void) { return 0; }
+          void ksu_exit_rules(void) { }
+          int ksu_apply_rules(void) { return 0; }
+          RULESEOF
+            echo "rules.c replaced with stub"
+          fi
+          
           echo "=== Compatibility fixes applied ==="
       
            # 7) Declare selinux_state for 4.4 (extern, defined in security.h)
