@@ -101,46 +101,46 @@ jobs:
           done
           echo "OK"
 
-      - name: "[5/8] Download and extract KSU Next driver (legacy)"
+      - name: "[5/8] Download & integrate KSU Next driver (legacy)"
         working-directory: ./kernel
         run: |
           V="${{ github.event.inputs.ksu_version }}"
           V="${V:-v3.1.0-legacy}"
 
-          # Map version to the exact tag name (already correct)
           echo "Using KSU version: $V"
 
-          # Remove any previous KSU driver
+          # Remove previous driver
           rm -rf drivers/kernelsu KernelSU-Next
 
-          # Download and extract the legacy release tarball
+          # Download the exact legacy release tarball
           echo "Downloading KernelSU Next $V..."
           curl -L "https://github.com/KernelSU-Next/KernelSU-Next/archive/refs/tags/${V}.tar.gz" -o /tmp/ksu.tar.gz
           mkdir -p /tmp/ksu-src
           tar xzf /tmp/ksu.tar.gz -C /tmp/ksu-src --strip-components=1
 
-          # Copy the kernel driver into the kernel tree
+          # Copy the driver folder
           if [ -d /tmp/ksu-src/kernel ]; then
             cp -r /tmp/ksu-src/kernel drivers/kernelsu
           else
-            echo "❌ 'kernel' directory not found in release – check tag structure"
+            echo "❌ kernel/ not found in release"
             exit 1
           fi
 
-          # Verify the driver source files exist
-          [ -f drivers/kernelsu/ksu.c ] || { echo "❌ ksu.c still missing after copy"; exit 1; }
-          echo "✅ KSU driver placed successfully"
+          # Run the official setup.sh (handles hooks + backports)
+          if [ -f /tmp/ksu-src/kernel/setup.sh ]; then
+            echo "Running official KSU setup.sh..."
+            cp /tmp/ksu-src/kernel/setup.sh /tmp/ksu-setup.sh
+            chmod +x /tmp/ksu-setup.sh
+            /tmp/ksu-setup.sh legacy   # legacy mode forces manual hooks
+          else
+            echo "❌ setup.sh missing from release"
+            exit 1
+          fi
 
-      - name: "[6/8] Coccinelle patches"
-        working-directory: ./kernel
-        run: |
-          git clone --depth=1 https://github.com/devnoname120/kernelsu-coccinelle /tmp/cc
-          cp -r /tmp/cc/scope-minimized-hooks /tmp/hooks
-          cd /tmp/hooks && chmod +x apply.sh
-          ./apply.sh "${{ github.workspace }}/kernel"
-          cd "${{ github.workspace }}/kernel"
-          grep -q "ksu_handle_execveat" fs/exec.c || { echo "NO HOOK"; exit 1; }
-          echo "OK"
+          # Verify that the hooks are now present
+          grep -q "ksu_handle_execveat" fs/exec.c || { echo "❌ hooks not applied by setup.sh"; exit 1; }
+          [ -f drivers/kernelsu/ksu.c ] || { echo "❌ ksu.c missing"; exit 1; }
+          echo "✅ KSU driver integrated with hooks"
 
       - name: "[7/8] Cleanup"
         working-directory: ./kernel
