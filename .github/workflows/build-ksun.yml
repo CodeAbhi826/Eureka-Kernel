@@ -126,7 +126,20 @@ jobs:
           cp -r /tmp/ksu-src/kernel/* drivers/kernelsu/
                 
           # Run official setup.sh (legacy mode)
-          bash drivers/kernelsu/setup.sh legacy
+          # --- Manual KSU Next setup (replaces setup.sh which changes directory) ---
+          # 1. Add kernelsu to the kernel's driver build system
+          if ! grep -q 'CONFIG_KSU' drivers/Makefile 2>/dev/null; then
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          fi
+          if ! grep -q 'kernelsu/Kconfig' drivers/Kconfig 2>/dev/null; then
+            echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+          fi
+          
+          # 2. Symlink KSU headers so #include <linux/kernelsu/*> works
+          if [ ! -e include/linux/kernelsu ]; then
+            ln -sf ../../drivers/kernelsu/include/kernelsu include/linux/kernelsu
+          fi
+          # -----------------------------------------------------------------------
       
           # Replace module Makefile with in-tree Kbuild
           cat > drivers/kernelsu/Kbuild << 'EOF'
