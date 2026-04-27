@@ -115,6 +115,42 @@ jobs:
           tar xzf /tmp/ksu.tar.gz -C /tmp/ksu-src --strip-components=1
           cp -r /tmp/ksu-src/kernel drivers/kernelsu
 
+          # Replace external-module Makefile with in-tree Kbuild (obj-y list)
+          if [ -f drivers/kernelsu/Kbuild ]; then
+            mv drivers/kernelsu/Kbuild drivers/kernelsu/Kbuild_original 2>/dev/null || true
+          fi
+          cat > drivers/kernelsu/Kbuild << 'KBUILDEOF'
+          # SPDX-License-Identifier: GPL-2.0
+          kernelsu-objs := ksu.o
+          kernelsu-objs += allowlist.o
+          kernelsu-objs += app_profile.o
+          kernelsu-objs += apk_sign.o
+          kernelsu-objs += sucompat.o
+          kernelsu-objs += syscall_hook_manager.o
+          kernelsu-objs += throne_tracker.o
+          kernelsu-objs += pkg_observer.o
+          kernelsu-objs += setuid_hook.o
+          kernelsu-objs += lsm_hooks.o
+          kernelsu-objs += kernel_compat.o
+          kernelsu-objs += kernel_umount.o
+          kernelsu-objs += supercalls.o
+          kernelsu-objs += su_mount_ns.o
+          kernelsu-objs += feature.o
+          kernelsu-objs += ksud.o
+          kernelsu-objs += seccomp_cache.o
+          kernelsu-objs += file_wrapper.o
+          kernelsu-objs += util.o
+          kernelsu-objs += extras.o
+          kernelsu-objs += selinux/selinux.o
+          kernelsu-objs += selinux/sepolicy.o
+          kernelsu-objs += selinux/rules.o
+          obj-$(CONFIG_KSU) += kernelsu.o
+          KBUILDEOF
+
+          # Remove the old Makefile so it doesn't interfere
+          rm -f drivers/kernelsu/Makefile
+          echo "Kbuild file created, old Makefile removed"
+          
           # Run official setup.sh (handles Makefile/Kconfig, backports)
           if [ -f /tmp/ksu-src/kernel/setup.sh ]; then
             cp /tmp/ksu-src/kernel/setup.sh /tmp/ksu-setup.sh
