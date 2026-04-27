@@ -328,6 +328,23 @@ jobs:
           make O=out ARCH=arm64 exynos7885-a20_defconfig
           make -j$(nproc) O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build.log
 
+      - name: "📋 Show build errors (if any)"
+        if: always()   # run even if the build step failed
+        working-directory: ./kernel
+        run: |
+          echo "============================="
+          echo " BUILD ERROR SUMMARY"
+          echo "============================="
+          if grep -E 'error:|fatal error' build.log > /tmp/errors.txt; then
+            echo "First 20 errors (full list in build.log):"
+            head -20 /tmp/errors.txt
+            echo ""
+            echo "Total error lines: $(wc -l < /tmp/errors.txt)"
+          else
+            echo "No compilation errors found."
+          fi
+          echo "============================="
+      
       - name: "🔍 Show driver build errors"
         working-directory: ./kernel
         run: |
