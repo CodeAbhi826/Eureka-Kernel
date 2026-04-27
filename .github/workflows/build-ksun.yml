@@ -239,9 +239,10 @@ jobs:
           sed -i '/ksu_handle_stat(/d' fs/stat.c
           echo "Old ksu_handle_stat call removed from fs/stat.c"
           
-          # Remove broken old KSU execveat declaration (line 1834 area)
+          # Remove entire old extern block (single or multi-line)
+          sed -i '/^extern int ksu_handle_execveat/,/);$/d' fs/exec.c
+          # Remove old call that matches the old signature (if still present)
           sed -i '/ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags)/d' fs/exec.c
-          sed -i '/extern int ksu_handle_execveat(/d' fs/exec.c
           echo "Old KSU exec code removed"
           
           # reboot hook
