@@ -101,25 +101,35 @@ jobs:
           done
           echo "OK"
 
-      - name: "[5/8] Integrate KSU Next"
+      - name: "[5/8] Download and extract KSU Next driver (legacy)"
         working-directory: ./kernel
         run: |
           V="${{ github.event.inputs.ksu_version }}"
-          # Fallback default for push triggers (no inputs)
           V="${V:-v3.1.0-legacy}"
+
+          # Map version to the exact tag name (already correct)
           echo "Using KSU version: $V"
-          case "$V" in
-            v3.1.0-legacy) R="v3.1.0-legacy"; F="" ;;
-            v3.1.0-legacy-susfs) R="v3.1.0-legacy-susfs"; F="" ;;
-            v3.0.1-legacy) R="v3.0.1-legacy"; F="" ;;
-            v3.0.0) R="next"; F="legacy" ;;
-            *) echo "BAD VERSION: $V"; exit 1 ;;
-          esac
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${R}/kernel/setup.sh" -o /tmp/s.sh
-          chmod +x /tmp/s.sh
-          [ -n "$F" ] && /tmp/s.sh $F || /tmp/s.sh
-          [ -f drivers/kernelsu/ksu.c ] || { echo "NO ksu.c"; exit 1; }
-          echo "OK"
+
+          # Remove any previous KSU driver
+          rm -rf drivers/kernelsu KernelSU-Next
+
+          # Download and extract the legacy release tarball
+          echo "Downloading KernelSU Next $V..."
+          curl -L "https://github.com/KernelSU-Next/KernelSU-Next/archive/refs/tags/${V}.tar.gz" -o /tmp/ksu.tar.gz
+          mkdir -p /tmp/ksu-src
+          tar xzf /tmp/ksu.tar.gz -C /tmp/ksu-src --strip-components=1
+
+          # Copy the kernel driver into the kernel tree
+          if [ -d /tmp/ksu-src/kernel ]; then
+            cp -r /tmp/ksu-src/kernel drivers/kernelsu
+          else
+            echo "❌ 'kernel' directory not found in release – check tag structure"
+            exit 1
+          fi
+
+          # Verify the driver source files exist
+          [ -f drivers/kernelsu/ksu.c ] || { echo "❌ ksu.c still missing after copy"; exit 1; }
+          echo "✅ KSU driver placed successfully"
 
       - name: "[6/8] Coccinelle patches"
         working-directory: ./kernel
