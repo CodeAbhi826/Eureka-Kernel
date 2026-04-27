@@ -190,9 +190,37 @@ jobs:
 
           PYEOF
 
+          # The Kbuild checks specifically for ksu_handle_sys_reboot in kernel/reboot.c
+          echo "Injecting reboot hook..."
+          if ! grep -q 'kernelsu_hook.h' kernel/reboot.c; then
+            sed -i '1i #include <linux/kernelsu_hook.h>' kernel/reboot.c
+          fi
+          # Find the SYSCALL_DEFINE4(reboot, ...) line and insert hook after its opening brace
+          python3 -c "
+          import re
+          with open('kernel/reboot.c', 'r') as f:
+              lines = f.readlines()
+          start = None
+          for i, line in enumerate(lines):
+              if re.search(r'SYSCALL_DEFINE4\(reboot,', line):
+                  start = i
+                  break
+          if start is not None:
+              for j in range(start, len(lines)):
+                  if '{' in lines[j]:
+                      lines.insert(j + 1, '\tif (ksu_handle_sys_reboot(magic1, magic2, cmd, arg)) return -EPERM;\n')
+                      break
+              with open('kernel/reboot.c', 'w') as f:
+                  f.writelines(lines)
+              print('Reboot hook inserted')
+          else:
+              print('SYSCALL_DEFINE4(reboot, not found, skipping')
+          "
+          
           # Verify hooks
           for check in \
             'fs/exec.c:ksu_handle_execveat' \
+            'kernel/reboot.c:ksu_handle_sys_reboot' \
             'fs/open.c:ksu_handle_open' \
             'fs/read_write.c:ksu_handle_read' \
             'fs/stat.c:ksu_handle_stat' \
