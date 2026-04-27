@@ -17,12 +17,7 @@ on:
           - 'v3.1.0-legacy-susfs'
           - 'v3.0.1-legacy'
           - 'v3.0.0'
-
-jobs:
-  build:
-    runs-on: ubuntu-24.04
-    # ... rest of your existing workflow ...
-
+          
 jobs:
   build:
     runs-on: ubuntu-24.04
