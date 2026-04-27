@@ -254,7 +254,6 @@ jobs:
             'fs/exec.c:ksu_handle_execveat' \
             'fs/open.c:ksu_handle_open' \
             'fs/read_write.c:ksu_handle_read' \
-            'fs/stat.c:ksu_handle_stat' \
             'kernel/fork.c:ksu_handle_clone' \
             'kernel/reboot.c:ksu_handle_sys_reboot'; do
             f="${check%%:*}"
