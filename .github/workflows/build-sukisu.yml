@@ -315,8 +315,8 @@ jobs:
           fi
 
           # 5) Verify the presence of the KSU initcall (checked by symbol)
-          if aarch64-linux-gnu-nm out/arch/arm64/boot/Image | grep -q "ksu_init\|kernelsu_init"; then
-            echo "✅ 5/5: KSU initcall symbol present in Image"
+          if aarch64-linux-gnu-nm out/vmlinux | grep -q "ksu_init\|kernelsu_init"; then
+            echo "✅ 5/5: KSU initcall symbol present in vmlinux"
           else
             echo "❌ 5/5: KSU initcall symbol missing – driver may not run"
             exit 1
