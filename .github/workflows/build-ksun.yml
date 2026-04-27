@@ -2,7 +2,7 @@ name: Build KSU Next Legacy
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "R15-OneUI" ]
   workflow_dispatch:
     inputs:
       ksu_version:
