@@ -190,9 +190,9 @@ jobs:
                                   const char __user *const __user *envp, int flags);
           int ksu_handle_open(int dfd, const char __user *filename, int flags, umode_t mode);
           int ksu_handle_read(unsigned int fd, char __user *buf, size_t count);
-          int ksu_handle_stat(const char __user *filename, struct kstat *statbuf);
+          int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
           int ksu_handle_clone(unsigned long clone_flags, unsigned long newsp,
-                              int __user *parent_tidptr, int __user *child_tidptr, unsigned long tls);
+          int __user *parent_tidptr, int __user *child_tidptr, unsigned long tls);
           int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
           #endif
           HEADEREOF
@@ -204,7 +204,6 @@ jobs:
               ("fs/exec.c", r"SYSCALL_DEFINE5\(execveat,", 'if (ksu_handle_execveat(filename, &argv, &envp, flags)) return -EPERM;'),
               ("fs/open.c", r"SYSCALL_DEFINE3\(open,", 'if (ksu_handle_open(AT_FDCWD, filename, flags, mode)) return -EPERM;'),
               ("fs/read_write.c", r"SYSCALL_DEFINE3\(read,", 'if (ksu_handle_read(fd, buf, count)) return -EPERM;'),
-              ("fs/stat.c", r"SYSCALL_DEFINE2\(newstat,", 'if (ksu_handle_stat(filename, statbuf)) return -EPERM;'),
               ("kernel/fork.c", r"SYSCALL_DEFINE5\(clone, unsigned long, clone_flags, unsigned long, newsp,", 'if (ksu_handle_clone(clone_flags, newsp, parent_tidptr, child_tidptr, tls)) return -EPERM;'),
           ]
           header = '#include <linux/kernelsu_hook.h>'
@@ -225,6 +224,13 @@ jobs:
               print(f"Hook inserted in {filepath}")
           PYEOF
 
+          # Remove old KSU extern declarations in fs/stat.c that conflict with our header
+          sed -i '/^extern int ksu_handle_stat/d' fs/stat.c
+          sed -i '/^extern int ksu_handle_open/d' fs/open.c   2>/dev/null || true
+          sed -i '/^extern int ksu_handle_read/d' fs/read_write.c 2>/dev/null || true
+          sed -i '/^extern int ksu_handle_execveat/d' fs/exec.c 2>/dev/null || true
+          echo "Cleaned up old KSU externs"
+          
           # reboot hook
           if ! grep -q 'kernelsu_hook.h' kernel/reboot.c; then
             sed -i '1i #include <linux/kernelsu_hook.h>' kernel/reboot.c
