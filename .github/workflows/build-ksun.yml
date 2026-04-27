@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - '.github/workflows/build-ksu-next-legacy.yml'
+      - '.github/workflows/build-ksun.yml'
   workflow_dispatch:
     inputs:
       ksu_version:
