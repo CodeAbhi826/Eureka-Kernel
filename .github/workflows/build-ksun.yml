@@ -190,6 +190,7 @@ jobs:
           # Remove MODULE_IMPORT_NS and stub compiler_types.h
           find drivers/kernelsu -type f -name '*.c' -exec sed -i 's/MODULE_IMPORT_NS(.*);//' {} \;
           find drivers/kernelsu -type f -name '*.h' -exec sed -i 's/MODULE_IMPORT_NS(.*);//' {} \;
+          mkdir -p include/linux
           if [ ! -f include/linux/compiler_types.h ]; then
             touch include/linux/compiler_types.h
           fi
