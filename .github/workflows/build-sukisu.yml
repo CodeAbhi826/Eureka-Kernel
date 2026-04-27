@@ -1,6 +1,11 @@
 name: Build Eureka R15-OneUI + SukiSU Ultra (verified)
 
 on:
+  push:
+    branches: [ "R15-OneUI" ]          # change to your branch name
+    # paths:                      # optional – uncomment to limit triggers
+    #   - 'workflows/**'
+    #   - 'kernel_patches/**'
   workflow_dispatch:
     inputs:
       suki_mode:
@@ -10,8 +15,7 @@ on:
         default: 'non‑gki'
         options:
           - 'non‑gki (old legacy hooks)'
-          - 'gki (LKM)'   # not implemented yet
-
+          - 'gki (LKM)'
 jobs:
   build:
     runs-on: ubuntu-24.04
