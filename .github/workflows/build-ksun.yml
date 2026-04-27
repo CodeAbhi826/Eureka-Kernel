@@ -291,6 +291,15 @@ jobs:
           make O=out ARCH=arm64 exynos7885-a20_defconfig
           make -j$(nproc) O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build.log
 
+      - name: "🔍 Show driver build errors"
+        working-directory: ./kernel
+        run: |
+          echo "=== All lines mentioning 'kernelsu' in build.log ==="
+          grep -i 'kernelsu' build.log || echo "(no lines found)"
+          echo ""
+          echo "=== Suspected errors (ld.lld / undefined) ==="
+          grep -E 'undefined|ld.lld: error' build.log || echo "(no linker errors)"
+      
       - name: "Final verify"
         working-directory: ./kernel
         run: |
