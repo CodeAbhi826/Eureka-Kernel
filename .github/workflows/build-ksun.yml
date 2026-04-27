@@ -101,7 +101,7 @@ jobs:
           done
           echo "OK"
 
-      - name: "[5/8] Integrate KSU Next driver + precise hooks"
+      - name: "[5/8] Integrate KSU Next driver (in‑tree build) + hooks + backports"
         working-directory: ./kernel
         run: |
           V="${{ github.event.inputs.ksu_version }}"
@@ -115,12 +115,15 @@ jobs:
           tar xzf /tmp/ksu.tar.gz -C /tmp/ksu-src --strip-components=1
           cp -r /tmp/ksu-src/kernel drivers/kernelsu
 
-          # Replace external-module Makefile with in-tree Kbuild (obj-y list)
-          if [ -f drivers/kernelsu/Kbuild ]; then
-            mv drivers/kernelsu/Kbuild drivers/kernelsu/Kbuild_original 2>/dev/null || true
+          # Run official setup.sh (patches drivers/Makefile, Kconfig, selinux backports, etc.)
+          if [ -f /tmp/ksu-src/kernel/setup.sh ]; then
+            cp /tmp/ksu-src/kernel/setup.sh /tmp/ksu-setup.sh
+            chmod +x /tmp/ksu-setup.sh
+            /tmp/ksu-setup.sh legacy || echo "setup.sh returned non-zero, continuing..."
           fi
+
+          # ─── Replace external module Makefile with in‑tree Kbuild ───
           cat > drivers/kernelsu/Kbuild << 'KBUILDEOF'
-          # SPDX-License-Identifier: GPL-2.0
           kernelsu-objs := ksu.o
           kernelsu-objs += allowlist.o
           kernelsu-objs += app_profile.o
@@ -146,62 +149,57 @@ jobs:
           kernelsu-objs += selinux/rules.o
           obj-$(CONFIG_KSU) += kernelsu.o
           KBUILDEOF
-
-          # Remove the old Makefile so it doesn't interfere
           rm -f drivers/kernelsu/Makefile
-          echo "Kbuild file created, old Makefile removed"
-          
-          # Run official setup.sh (handles Makefile/Kconfig, backports)
-          if [ -f /tmp/ksu-src/kernel/setup.sh ]; then
-            cp /tmp/ksu-src/kernel/setup.sh /tmp/ksu-setup.sh
-            chmod +x /tmp/ksu-setup.sh
-            /tmp/ksu-setup.sh legacy || echo "setup.sh returned non-zero, continuing..."
-          fi
+          echo "In‑tree Kbuild created"
 
-          # Create the REAL hook header with proper prototypes and necessary includes
+          # ─── Backport kvmalloc/kvfree (real implementations) ───
+          cat > drivers/kernelsu/compat_backport.c << 'BACKPORTEOF'
+          #include <linux/mm.h>
+          #include <linux/vmalloc.h>
+          #include <linux/slab.h>
+          void *kvmalloc(size_t size, gfp_t flags) {
+              void *ret;
+              if (size <= PAGE_SIZE) ret = kmalloc(size, flags | __GFP_NOWARN);
+              else ret = vmalloc(size);
+              if (!ret && (size > PAGE_SIZE || !(flags & __GFP_NOWARN))) ret = vmalloc(size);
+              return ret;
+          }
+          void kvfree(const void *addr) {
+              if (is_vmalloc_addr(addr)) vfree(addr);
+              else kfree(addr);
+          }
+          BACKPORTEOF
+          echo "obj-y += compat_backport.o" >> drivers/kernelsu/Kbuild
+
+          # ─── Remove MODULE_IMPORT_NS and stub headers ───
+          grep -rIl 'MODULE_IMPORT_NS' drivers/kernelsu/ 2>/dev/null | while read f; do
+            sed -i '/MODULE_IMPORT_NS/d' "$f"
+          done
+          [ -f include/linux/compiler_types.h ] || echo '#include <linux/compiler.h>' > include/linux/compiler_types.h
+
+          # ─── Create hook header (real prototypes) ───
           cat > include/linux/kernelsu_hook.h << 'HEADEREOF'
-          /* SPDX-License-Identifier: GPL-2.0 */
           #ifndef _LINUX_KERNELSU_HOOK_H
           #define _LINUX_KERNELSU_HOOK_H
-
           #include <linux/types.h>
           #include <linux/sched.h>
-          #include <linux/stat.h>    /* for struct kstat */
-          #include <linux/fcntl.h>   /* for AT_FDCWD */
-
-          /* syscall hooks – real implementation in drivers/kernelsu */
-
+          #include <linux/stat.h>
+          #include <linux/fcntl.h>
           int ksu_handle_execveat(const char __user *filename,
                                   const char __user *const __user *argv,
-                                  const char __user *const __user *envp,
-                                  int flags);
-
-          int ksu_handle_open(int dfd, const char __user *filename,
-                             int flags, umode_t mode);
-
-          int ksu_handle_read(unsigned int fd, char __user *buf,
-                             size_t count);
-
-          int ksu_handle_stat(const char __user *filename,
-                             struct kstat *statbuf);
-
-          int ksu_handle_clone(unsigned long clone_flags,
-                              unsigned long newsp,
-                              int __user *parent_tidptr,
-                              int __user *child_tidptr,
-                              unsigned long tls);
-
-          int ksu_handle_sys_reboot(int magic1, int magic2,
-                                    unsigned int cmd, void __user *arg);
-
-          #endif /* _LINUX_KERNELSU_HOOK_H */
+                                  const char __user *const __user *envp, int flags);
+          int ksu_handle_open(int dfd, const char __user *filename, int flags, umode_t mode);
+          int ksu_handle_read(unsigned int fd, char __user *buf, size_t count);
+          int ksu_handle_stat(const char __user *filename, struct kstat *statbuf);
+          int ksu_handle_clone(unsigned long clone_flags, unsigned long newsp,
+                              int __user *parent_tidptr, int __user *child_tidptr, unsigned long tls);
+          int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
+          #endif
           HEADEREOF
-          echo "Created include/linux/kernelsu_hook.h (fixed prototypes)"
 
-          # Python script to inject syscall hooks (execveat, open, read, newstat, clone)
+          # ─── Inject hooks (Python) ───
           python3 << 'PYEOF'
           import re, os
-
           hooks = [
               ("fs/exec.c", r"SYSCALL_DEFINE5\(execveat,", 'if (ksu_handle_execveat(filename, &argv, &envp, flags)) return -EPERM;'),
               ("fs/open.c", r"SYSCALL_DEFINE3\(open,", 'if (ksu_handle_open(AT_FDCWD, filename, flags, mode)) return -EPERM;'),
@@ -209,74 +207,43 @@ jobs:
               ("fs/stat.c", r"SYSCALL_DEFINE2\(newstat,", 'if (ksu_handle_stat(filename, statbuf)) return -EPERM;'),
               ("kernel/fork.c", r"SYSCALL_DEFINE5\(clone, unsigned long, clone_flags, unsigned long, newsp,", 'if (ksu_handle_clone(clone_flags, newsp, parent_tidptr, child_tidptr, tls)) return -EPERM;'),
           ]
-
-          for filepath, pattern, hook_line in hooks:
-              if not os.path.exists(filepath):
-                  print(f"File {filepath} not found, skipping")
-                  continue
-              with open(filepath, 'r') as f:
-                  lines = f.readlines()
-              start_idx = None
-              for i, line in enumerate(lines):
-                  if re.search(pattern, line):
-                      start_idx = i
-                      break
-              if start_idx is None:
-                  print(f"Pattern not found in {filepath}, skipping")
-                  continue
-              insert_idx = None
-              for i in range(start_idx, len(lines)):
-                  if '{' in lines[i]:
-                      insert_idx = i + 1
-                      break
-              if insert_idx is None:
-                  print(f"No opening brace found after pattern in {filepath}, skipping")
-                  continue
-              lines.insert(insert_idx, '\t' + hook_line + '\n')
-              with open(filepath, 'w') as f:
-                  f.writelines(lines)
-              print(f"Inserted hook in {filepath} after line {insert_idx}")
-
-          # Ensure header at top
           header = '#include <linux/kernelsu_hook.h>'
-          for filepath, _, _ in hooks:
-              if not os.path.exists(filepath):
-                  continue
-              with open(filepath, 'r') as f:
-                  content = f.read()
-              if 'kernelsu_hook.h' not in content:
-                  with open(filepath, 'w') as f:
-                      f.write(header + '\n' + content)
-                  print(f"Added header to {filepath}")
+          for filepath, pattern, hook_line in hooks:
+              if not os.path.exists(filepath): continue
+              with open(filepath, 'r') as f: lines = f.readlines()
+              if 'kernelsu_hook.h' not in ''.join(lines):
+                  lines.insert(0, header+'\n')
+              start = None
+              for i, line in enumerate(lines):
+                  if re.search(pattern, line): start=i; break
+              if start is not None:
+                  for j in range(start, len(lines)):
+                      if '{' in lines[j]:
+                          lines.insert(j+1, '\t'+hook_line+'\n')
+                          break
+              with open(filepath, 'w') as f: f.writelines(lines)
+              print(f"Hook inserted in {filepath}")
           PYEOF
 
-          # CRITICAL: Inject reboot hook (the Kbuild checks for ksu_handle_sys_reboot)
-          echo "Injecting reboot hook..."
+          # reboot hook
           if ! grep -q 'kernelsu_hook.h' kernel/reboot.c; then
             sed -i '1i #include <linux/kernelsu_hook.h>' kernel/reboot.c
           fi
           python3 << 'PYEOF2'
           import re
-          with open('kernel/reboot.c', 'r') as f:
-              lines = f.readlines()
-          start = None
+          with open('kernel/reboot.c', 'r') as f: lines=f.readlines()
           for i, line in enumerate(lines):
               if re.search(r'SYSCALL_DEFINE4\(reboot,', line):
-                  start = i
+                  for j in range(i, len(lines)):
+                      if '{' in lines[j]:
+                          lines.insert(j+1, '\tif (ksu_handle_sys_reboot(magic1, magic2, cmd, arg)) return -EPERM;\n')
+                          break
                   break
-          if start is not None:
-              for j in range(start, len(lines)):
-                  if '{' in lines[j]:
-                      lines.insert(j + 1, '\tif (ksu_handle_sys_reboot(magic1, magic2, cmd, arg)) return -EPERM;\n')
-                      break
-              with open('kernel/reboot.c', 'w') as f:
-                  f.writelines(lines)
-              print('Reboot hook inserted')
-          else:
-              print('SYSCALL_DEFINE4(reboot, not found')
+          with open('kernel/reboot.c', 'w') as f: f.writelines(lines)
+          print('Reboot hook inserted')
           PYEOF2
 
-          # Verify all hooks, including the critical reboot one
+          # ─── Final hook verification ───
           for check in \
             'fs/exec.c:ksu_handle_execveat' \
             'fs/open.c:ksu_handle_open' \
@@ -286,15 +253,13 @@ jobs:
             'kernel/reboot.c:ksu_handle_sys_reboot'; do
             f="${check%%:*}"
             s="${check##*:}"
-            if grep -q "$s" "$f"; then
-              echo "  ✅ $f: $s"
-            else
-              echo "  ❌ $f: $s MISSING"
+            if ! grep -q "$s" "$f"; then
+              echo "❌ Hook $s missing in $f"
               exit 1
             fi
           done
 
-          echo "✅ All hooks (including reboot) injected and verified"
+          echo "✅ All hooks present and driver ready for in‑tree build"
           
       - name: "🔍 Check driver build integration"
         working-directory: ./kernel
