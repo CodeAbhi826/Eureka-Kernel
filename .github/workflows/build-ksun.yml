@@ -105,12 +105,15 @@ jobs:
         working-directory: ./kernel
         run: |
           V="${{ github.event.inputs.ksu_version }}"
+          # Fallback default for push triggers (no inputs)
+          V="${V:-v3.1.0-legacy}"
+          echo "Using KSU version: $V"
           case "$V" in
             v3.1.0-legacy) R="v3.1.0-legacy"; F="" ;;
             v3.1.0-legacy-susfs) R="v3.1.0-legacy-susfs"; F="" ;;
             v3.0.1-legacy) R="v3.0.1-legacy"; F="" ;;
             v3.0.0) R="next"; F="legacy" ;;
-            *) echo "BAD VERSION"; exit 1 ;;
+            *) echo "BAD VERSION: $V"; exit 1 ;;
           esac
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${R}/kernel/setup.sh" -o /tmp/s.sh
           chmod +x /tmp/s.sh
@@ -152,12 +155,17 @@ jobs:
           cp out/arch/arm64/boot/Image .
           echo "ALL OK"
 
-      - name: "Package ZIP"
+      - name: "📦 Create flashable ZIP"
+        id: zip
         run: |
-          cp -r kernel/kernel_zip/anykernel anykernel
-          cp kernel/Image anykernel/
-          cd anykernel && zip -r9 ../ksu.zip . && cd ..
-          echo "ZIP=ksu.zip" >> $GITHUB_ENV
+          VERSION="${{ github.event.inputs.ksu_version }}"
+          VERSION="${VERSION:-v3.1.0-legacy}"
+          BUILD_NO=$(printf "%03d" ${{ github.run_number }})
+          ZIP_NAME="ksu-next-${VERSION}-a20-${BUILD_NO}"
+          cd anykernel
+          zip -r9 "../${ZIP_NAME}.zip" .
+          cd ..
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
 
       - name: "Upload"
         uses: actions/upload-artifact@v4
