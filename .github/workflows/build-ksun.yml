@@ -114,8 +114,17 @@ jobs:
           # Download driver
           mkdir -p /tmp/ksu-src
           curl -L "https://github.com/KernelSU-Next/KernelSU-Next/archive/refs/tags/${V}.tar.gz" | tar xz -C /tmp/ksu-src --strip-components=1
-          cp -r /tmp/ksu-src/kernel drivers/kernelsu
-      
+          # Ensure source exists
+          if [ ! -d /tmp/ksu-src/kernel ]; then
+            echo "ERROR: /tmp/ksu-src/kernel not found – tarball extraction may have failed"
+            ls -la /tmp/ksu-src/
+            exit 1
+          fi
+          
+          # Create destination tree (handles missing drivers/ gracefully)
+          mkdir -p drivers/kernelsu
+          cp -r /tmp/ksu-src/kernel/* drivers/kernelsu/
+                
           # Run official setup.sh (legacy mode)
           cd drivers/kernelsu
           bash setup.sh legacy
