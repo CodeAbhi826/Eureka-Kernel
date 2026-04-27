@@ -35,7 +35,11 @@ jobs:
       - name: "[1/8] Install dependencies"
         run: |
           sudo apt update -qq
-          sudo apt install -y bc bison flex libssl-dev make git python3 cpio gcc-aarch64-linux-gnu coccinelle
+          sudo apt install -y bc bison flex libssl-dev make git python3 cpio gcc-aarch64-linux-gnu
+          # Ubuntu 24.04 requires universe for coccinelle
+          sudo add-apt-repository -y universe
+          sudo apt update -qq
+          sudo apt install -y coccinelle
 
       - name: "Verify deps"
         run: |
