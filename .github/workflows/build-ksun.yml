@@ -2,7 +2,7 @@ name: Build KSU Next Legacy
 
 on:
   push:
-    branches: [ "R15-OneUI" ]
+    branches: [ "main" ]
     paths:
       - '.github/workflows/build-ksu-next-legacy.yml'
   workflow_dispatch:
