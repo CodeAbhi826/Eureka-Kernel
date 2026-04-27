@@ -101,12 +101,11 @@ jobs:
           done
           echo "OK"
 
-      - name: "[5/8] Integrate KSU Next driver + hooks (manual fallback)"
+      - name: "[5/8] Integrate KSU Next driver + precise hooks"
         working-directory: ./kernel
         run: |
           V="${{ github.event.inputs.ksu_version }}"
           V="${V:-v3.1.0-legacy}"
-
           echo "Using KSU version: $V"
           rm -rf drivers/kernelsu KernelSU-Next
 
@@ -114,67 +113,87 @@ jobs:
           curl -L "https://github.com/KernelSU-Next/KernelSU-Next/archive/refs/tags/${V}.tar.gz" -o /tmp/ksu.tar.gz
           mkdir -p /tmp/ksu-src
           tar xzf /tmp/ksu.tar.gz -C /tmp/ksu-src --strip-components=1
-
-          if [ ! -d /tmp/ksu-src/kernel ]; then
-            echo "❌ kernel/ not found"
-            exit 1
-          fi
           cp -r /tmp/ksu-src/kernel drivers/kernelsu
 
-          # Run official setup.sh (may fail at hooks but can still do backports)
+          # Run official setup.sh (handles Makefile/Kconfig, possibly backports)
           if [ -f /tmp/ksu-src/kernel/setup.sh ]; then
             cp /tmp/ksu-src/kernel/setup.sh /tmp/ksu-setup.sh
             chmod +x /tmp/ksu-setup.sh
             /tmp/ksu-setup.sh legacy || echo "setup.sh returned non-zero, continuing..."
           fi
 
-          # Force-inject hooks – these are the exact calls that the driver's Kbuild scans for
-          echo "Injecting KSU hooks manually..."
+          # Ensure hook header is accessible (symlink or copy to include/linux)
+          if [ -f drivers/kernelsu/kernelsu_hook.h ]; then
+            ln -sf "$(pwd)/drivers/kernelsu/kernelsu_hook.h" include/linux/kernelsu_hook.h
+            echo "Symlinked kernelsu_hook.h to include/linux/"
+          else
+            echo "⚠️ kernelsu_hook.h not found in driver"
+          fi
 
-          # Helper function to add hook to a syscall file
-          add_hook() {
+          # Inject hooks that exactly match the Eureka kernel's syscall signatures
+          echo "Injecting hooks using precise sed patterns..."
+
+          # Helpers
+          hook_after_brace() {
+            # Usage: hook_after_brace <file> <search_pattern> <hook_code>
+            # Finds the line matching <search_pattern>, then appends <hook_code>
+            # after the next line that begins with '{'
+            sed -i "/$2/,/^{/{
+              /^{/a\\
+$3
+            }" "$1"
+          }
+          ensure_header() {
             local file="$1"
-            local hookcall="$2"
-            local funcname="$3"
-            if [ ! -f "$file" ]; then return 0; fi
-            if ! grep -q "$hookcall" "$file"; then
-              # Include header at top if not already present
-              if ! grep -q 'kernelsu_hook.h' "$file"; then
-                sed -i '1i #include "kernelsu_hook.h"' "$file"
-              fi
-              # Insert call right after the opening brace of the target syscall function
-              # This assumes the syscall definition starts with SYSCALL_DEFINE
-              sed -i "/^SYSCALL_DEFINE[0-9](${funcname}/,/{/ { /{/s/{/{\n\tif (${hookcall}) return -EPERM;/ }" "$file"
+            if ! grep -q 'kernelsu_hook.h' "$file"; then
+              sed -i '1i #include <linux/kernelsu_hook.h>' "$file"
             fi
           }
 
-          # Add hooks for each required syscall
-          for sys in \
-            "execveat:ksu_handle_execveat(filename, &argv, &envp, flags)" \
-            "open:ksu_handle_open(&filename, flags, mode)" \
-            "read:ksu_handle_read(fd, buf, count)" \
-            "newstat:ksu_handle_stat(filename, statbuf)" \
-            "clone:ksu_handle_clone(clone_flags, newsp, parent_tidptr, child_tidptr, tls)"; do
+          # fs/exec.c → execveat (line 2159)
+          ensure_header fs/exec.c
+          hook_after_brace fs/exec.c 'SYSCALL_DEFINE5(execveat,' \
+            'if (ksu_handle_execveat(filename, \&argv, \&envp, flags)) return -EPERM;'
 
-            func="${sys%%:*}"
-            call="${sys##*:}"
-            # Map to correct file
-            case "$func" in
-              execveat) add_hook "fs/exec.c" "$call" "execveat" ;;
-              open)     add_hook "fs/open.c" "$call" "open" ;;
-              read)     add_hook "fs/read_write.c" "$call" "read" ;;
-              newstat)  add_hook "fs/stat.c" "$call" "newstat" ;;
-              clone)    add_hook "kernel/fork.c" "$call" "clone" ;;
-            esac
+          # fs/open.c → open (line 1149: SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode))
+          ensure_header fs/open.c
+          hook_after_brace fs/open.c 'SYSCALL_DEFINE3(open,' \
+            'if (ksu_handle_open(\&filename, flags, mode)) return -EPERM;'
+
+          # fs/read_write.c → read (line 580)
+          ensure_header fs/read_write.c
+          hook_after_brace fs/read_write.c 'SYSCALL_DEFINE3(read,' \
+            'if (ksu_handle_read(fd, buf, count)) return -EPERM;'
+
+          # fs/stat.c → newstat (line 271)
+          ensure_header fs/stat.c
+          hook_after_brace fs/stat.c 'SYSCALL_DEFINE2(newstat,' \
+            'if (ksu_handle_stat(filename, statbuf)) return -EPERM;'
+
+          # kernel/fork.c → clone (line 2135, first occurrence)
+          ensure_header kernel/fork.c
+          hook_after_brace kernel/fork.c 'SYSCALL_DEFINE5(clone, unsigned long, clone_flags, unsigned long, newsp,' \
+            'if (ksu_handle_clone(clone_flags, newsp, parent_tidptr, child_tidptr, tls)) return -EPERM;'
+
+          # Verify hooks
+          echo "Verifying hooks..."
+          for check in \
+            'fs/exec.c:ksu_handle_execveat' \
+            'fs/open.c:ksu_handle_open' \
+            'fs/read_write.c:ksu_handle_read' \
+            'fs/stat.c:ksu_handle_stat' \
+            'kernel/fork.c:ksu_handle_clone'; do
+            f="${check%%:*}"
+            s="${check##*:}"
+            if grep -q "$s" "$f"; then
+              echo "  ✅ $f: $s"
+            else
+              echo "  ❌ $f: $s MISSING"
+              exit 1
+            fi
           done
 
-          # Verify at least one hook landed
-          if ! grep -rq 'ksu_handle_' fs/exec.c fs/open.c fs/read_write.c fs/stat.c kernel/fork.c 2>/dev/null; then
-            echo "❌ Manual hooks failed"
-            exit 1
-          fi
-
-          echo "✅ Hooks injected"
+          echo "✅ All hooks injected successfully"
 
       - name: "[7/8] Cleanup"
         working-directory: ./kernel
