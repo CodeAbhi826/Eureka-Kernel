@@ -260,6 +260,24 @@ jobs:
 
           echo "✅ All hooks (including reboot) injected and verified"
           
+      - name: "🔍 Check driver build integration"
+        working-directory: ./kernel
+        run: |
+          echo "=== Does drivers/Makefile include kernelsu? ==="
+          grep -n 'kernelsu' drivers/Makefile || echo "NOT FOUND"
+          echo ""
+          echo "=== Does drivers/Kconfig source kernelsu? ==="
+          grep -n 'kernelsu' drivers/Kconfig || echo "NOT FOUND"
+          echo ""
+          echo "=== Contents of drivers/kernelsu/Makefile ==="
+          cat drivers/kernelsu/Makefile 2>/dev/null || echo "FILE MISSING"
+          echo ""
+          echo "=== Contents of drivers/kernelsu/Kconfig ==="
+          cat drivers/kernelsu/Kconfig 2>/dev/null || echo "FILE MISSING"
+          echo ""
+          echo "=== All CONFIG_KSU lines in .config ==="
+          grep 'CONFIG_KSU' out/.config 2>/dev/null || echo ".config not found yet"
+      
       - name: "[7/8] Cleanup"
         working-directory: ./kernel
         run: |
