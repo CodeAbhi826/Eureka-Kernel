@@ -209,7 +209,6 @@ jobs:
 
           # 7) Replace selinux.c, sepolicy.c, rules.c with minimal stubs
           #    (since full SELinux internals are incompatible)
-          #    BUT we must still provide all symbols the driver expects.
           echo "Creating stub for selinux.c"
           cat > drivers/kernelsu/selinux/selinux.c << 'SEEOF'
           /* SukiSU selinux stubs for kernel 4.4 */
@@ -245,51 +244,27 @@ jobs:
           int ksu_apply_rules(void) { return 0; }
           RULESEOF
 
-          # 8) CRITICAL: Provide missing symbols that the manual hooks still reference
-          #    (get_cred_rcu, is_zygote, etc.). We'll create a separate compat stub file.
-          echo "Creating compat_stubs.c for missing symbols"
+          # 8) Provide ONLY the truly missing symbols (get_cred_rcu, is_zygote)
+          #    without duplicating symbols already in selinux.c
+          echo "Creating compat_stubs.c (minimal)"
           cat > drivers/kernelsu/compat_stubs.c << 'COMPAT'
-          /* SukiSU additional stubs for kernel 4.4 */
+          /* SukiSU extra stubs for kernel 4.4 – only symbols not already in selinux.c */
           #include <linux/kernel.h>
-          #include <linux/uaccess.h>
           #include <linux/sched.h>
           #include <linux/cred.h>
 
-          /* Required by KSU exec hooks */
+          /* Required by KSU exec hooks (missing from stub selinux.c) */
           int is_zygote(const struct task_struct *task) { return 0; }
           void *get_cred_rcu(const struct task_struct *task) { return (void *)task->cred; }
-
-          /* Additional stubs that might be referenced */
-          int is_ksu_domain(void) { return 0; } /* already defined in selinux.c but we duplicate safe */
-          int path_umount(void *p, int f) { return -ENOSYS; }
-          int ksu_get_devpts_sid(void) { return 0; }
-          int apply_kernelsu_rules(void) { return 0; }
-          long strncpy_from_user_nofault(char *d, const char __user *s, long n)
-          { return strncpy_from_user(d, s, n); }
-
-          /* Add any other missing symbols here as errors appear */
           COMPAT
 
-          # Now add compat_stubs.o to the KSU Makefile so it gets compiled
-          # The Makefile typically has a line like: obj-$(CONFIG_KSU) += ksu.o ...
-          # We need to append compat_stubs.o to the list.
+          # Add compat_stubs.o to the KSU Makefile if not already present
           MAKEFILE="drivers/kernelsu/Makefile"
           if ! grep -q "compat_stubs.o" "$MAKEFILE"; then
-            # Add compat_stubs.o to the existing obj-y line (or create one)
-            if grep -q "obj-y" "$MAKEFILE"; then
-              sed -i 's/obj-y[[:space:]]*+=/obj-y += compat_stubs.o/' "$MAKEFILE"
-              # The above might duplicate, simpler: just append
-              echo "obj-y += compat_stubs.o" >> "$MAKEFILE"
-            else
-              echo "obj-y += compat_stubs.o" >> "$MAKEFILE"
-            fi
+            echo "obj-y += compat_stubs.o" >> "$MAKEFILE"
           fi
 
           echo "✅ Compatibility fixes applied"
-          # Quick check: no <linux/sched/task_stack.h> left
-          if grep -rq '<linux/sched/task_stack.h>' drivers/kernelsu/; then
-            echo "⚠️ Warning: task_stack.h still referenced somewhere"
-          fi
 
       # ─── STEP 6: BUILD KERNEL WITH DEEP VERIFICATION ───
       - name: Build kernel and verify KSU integration
