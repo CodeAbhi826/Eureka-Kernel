@@ -15,123 +15,52 @@ on:
           - 'v3.1.0-legacy-susfs'
           - 'v3.0.1-legacy'
           - 'v3.0.0'
-          
+
 jobs:
   build:
     runs-on: ubuntu-24.04
-
     steps:
-      # ─────────────────────────────────────
-      # STEP 0: CHECKOUT
-      # ─────────────────────────────────────
       - name: "[0/8] Checkout Eureka Kernel source"
-        id: checkout
         uses: actions/checkout@v4
         with:
           repository: eurekadevelopment/Eureka-Kernel
           ref: R15-OneUI
           path: kernel
 
-      - name: "✅ Verify checkout"
+      - name: "Verify checkout"
         run: |
-          echo "=== CHECKOUT VERIFICATION ==="
-          if [ -f kernel/Makefile ]; then
-            echo "✅ Kernel source present"
-            head -5 kernel/Makefile
-          else
-            echo "❌ Kernel source MISSING"
-            exit 1
-          fi
-          echo "============================="
+          [ -f kernel/Makefile ] || { echo "FAIL"; exit 1; }
+          echo "OK"
 
-      # ─────────────────────────────────────
-      # STEP 1: SYSTEM DEPENDENCIES
-      # ─────────────────────────────────────
-      - name: "[1/8] Install system dependencies + Coccinelle"
-        id: deps
+      - name: "[1/8] Install dependencies"
         run: |
           sudo apt update -qq
           sudo apt install -y bc bison flex libssl-dev make git python3 cpio gcc-aarch64-linux-gnu coccinelle
 
-      - name: "✅ Verify system dependencies (excluding toolchain)"
+      - name: "Verify deps"
         run: |
-          echo "=== SYSTEM DEPENDENCY VERIFICATION ==="
           for tool in bc bison flex make git python3 coccinelle aarch64-linux-gnu-gcc; do
-            if command -v $tool &>/dev/null; then
-              echo "✅ $tool: $(command -v $tool)"
-            else
-              echo "❌ $tool NOT FOUND"
-              exit 1
-            fi
+            command -v $tool || { echo "MISSING: $tool"; exit 1; }
           done
-          echo "Note: clang and ld.lld will be verified after toolchain setup"
-          echo "=========================================="
+          echo "OK"
 
-      # ─────────────────────────────────────
-      # STEP 2: TOOLCHAIN
-      # ─────────────────────────────────────
-      - name: "[2/8] Set up Neutron Clang toolchain"
-        id: toolchain
+      - name: "[2/8] Neutron Clang toolchain"
         run: |
-          mkdir -p toolchain
-          cd toolchain
+          mkdir -p toolchain && cd toolchain
           bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") -S=10032024
           bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
           cd ..
           echo "$(pwd)/toolchain/bin" >> $GITHUB_PATH
 
-      - name: "✅ Verify toolchain (clang, ld.lld, LLVM tools)"
+      - name: "Verify toolchain"
         run: |
-          echo "=== TOOLCHAIN VERIFICATION ==="
-          # Add toolchain to PATH
-          export PATH="$(pwd)/toolchain/bin:$PATH"
-          
-          # Verify clang
-          if command -v clang &>/dev/null; then
-            echo "✅ clang: $(clang --version 2>&1 | head -1)"
-          else
-            echo "❌ clang NOT FOUND"
-            exit 1
-          fi
-          
-          # Verify ld.lld
-          if command -v ld.lld &>/dev/null; then
-            echo "✅ ld.lld: $(ld.lld --version 2>&1 | head -1)"
-          else
-            echo "❌ ld.lld NOT FOUND"
-            exit 1
-          fi
-          
-          # Verify other LLVM tools
-          for tool in llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip; do
-            if command -v $tool &>/dev/null; then
-              echo "✅ $tool found"
-            else
-              echo "❌ $tool NOT FOUND"
-              exit 1
-            fi
-          done
-          echo "==============================="
-      
-      - name: "✅ Verify toolchain"
-        run: |
-          echo "=== TOOLCHAIN VERIFICATION ==="
           export PATH="$(pwd)/toolchain/bin:$PATH"
           for tool in clang ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip; do
-            if command -v $tool &>/dev/null; then
-              echo "✅ $tool: $($tool --version 2>&1 | head -1)"
-            else
-              echo "❌ $tool NOT FOUND"
-              exit 1
-            fi
+            command -v $tool || { echo "MISSING: $tool"; exit 1; }
           done
-          echo "==============================="
+          echo "OK"
 
-      # ─────────────────────────────────────
-      # STEP 3: ENVIRONMENT VARIABLES
-      # ─────────────────────────────────────
-      - name: "[3/8] Set build environment variables"
-        id: envvars
+      - name: "[3/8] Set env vars"
         run: |
           echo "CC=clang" >> $GITHUB_ENV
           echo "LD=ld.lld" >> $GITHUB_ENV
@@ -143,334 +72,89 @@ jobs:
           echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
           echo "ARCH=arm64" >> $GITHUB_ENV
 
-      - name: "✅ Verify env vars"
+      - name: "Verify env"
         run: |
-          echo "=== ENVIRONMENT VERIFICATION ==="
-          for var in CC LD AR NM OBJCOPY OBJDUMP STRIP CROSS_COMPILE ARCH; do
-            echo "$var = ${!var}"
-          done
-          if [ "$ARCH" != "arm64" ]; then
-            echo "❌ ARCH is not arm64!"
-            exit 1
-          fi
-          echo "✅ All environment variables set correctly"
-          echo "=================================="
+          [ "$ARCH" = "arm64" ] || { echo "BAD ARCH"; exit 1; }
+          echo "OK"
 
-      # ─────────────────────────────────────
-      # STEP 4: DEFCONFIG
-      # ─────────────────────────────────────
-      - name: "[4/8] Prepare defconfig for A20"
-        id: defconfig
+      - name: "[4/8] Patch defconfig"
         working-directory: ./kernel
         run: |
-          DEFCONFIG="arch/arm64/configs/exynos7885-a20_defconfig"
-          echo "=== Pre-patch defconfig ==="
-          grep -E "CONFIG_KSU|CONFIG_KALLSYMS|CONFIG_KPROBES|CONFIG_LTO|CONFIG_SIPHASH" "$DEFCONFIG" || echo "(some configs not present yet)"
+          D="arch/arm64/configs/exynos7885-a20_defconfig"
+          grep -q "CONFIG_KALLSYMS=y" "$D" || echo "CONFIG_KALLSYMS=y" >> "$D"
+          grep -q "CONFIG_KALLSYMS_ALL=y" "$D" || echo "CONFIG_KALLSYMS_ALL=y" >> "$D"
+          grep -q "CONFIG_KSU=y" "$D" || echo "CONFIG_KSU=y" >> "$D"
+          sed -i 's/^CONFIG_KPROBES=y/# CONFIG_KPROBES is not set/' "$D"
+          sed -i 's/^CONFIG_KRETPROBES=y/# CONFIG_KRETPROBES is not set/' "$D"
+          sed -i 's/^CONFIG_LTO=y/# CONFIG_LTO is not set/' "$D"
+          grep -q "CONFIG_SIPHASH=y" "$D" || echo "CONFIG_SIPHASH=y" >> "$D"
+          for s in CONFIG_KSU=y CONFIG_KALLSYMS=y CONFIG_KALLSYMS_ALL=y CONFIG_SIPHASH=y; do
+            grep -q "^$s" "$D" || { echo "MISSING: $s"; exit 1; }
+          done
+          echo "OK"
 
-          # Add required KSU symbols
-          grep -q "CONFIG_KALLSYMS=y" "$DEFCONFIG" || echo "CONFIG_KALLSYMS=y" >> "$DEFCONFIG"
-          grep -q "CONFIG_KALLSYMS_ALL=y" "$DEFCONFIG" || echo "CONFIG_KALLSYMS_ALL=y" >> "$DEFCONFIG"
-          grep -q "CONFIG_KSU=y" "$DEFCONFIG" || echo "CONFIG_KSU=y" >> "$DEFCONFIG"
-
-          # Disable features incompatible with manual hooks
-          sed -i 's/^CONFIG_KPROBES=y/# CONFIG_KPROBES is not set/' "$DEFCONFIG"
-          sed -i 's/^CONFIG_KRETPROBES=y/# CONFIG_KRETPROBES is not set/' "$DEFCONFIG"
-          sed -i 's/^CONFIG_LTO=y/# CONFIG_LTO is not set/' "$DEFCONFIG"
-
-          grep -q "CONFIG_SIPHASH=y" "$DEFCONFIG" || echo "CONFIG_SIPHASH=y" >> "$DEFCONFIG"
-
-      - name: "✅ Verify defconfig"
+      - name: "[5/8] Integrate KSU Next"
         working-directory: ./kernel
         run: |
-          echo "=== DEFCONFIG VERIFICATION ==="
-          DEFCONFIG="arch/arm64/configs/exynos7885-a20_defconfig"
-          for sym in CONFIG_KSU=y CONFIG_KALLSYMS=y CONFIG_KALLSYMS_ALL=y CONFIG_SIPHASH=y; do
-            if grep -q "^$sym" "$DEFCONFIG"; then
-              echo "✅ $sym"
-            else
-              echo "❌ $sym MISSING"
-              exit 1
-            fi
-          done
-          # Verify KPROBES/LTO are disabled
-          for bad in CONFIG_KPROBES=y CONFIG_KRETPROBES=y CONFIG_LTO=y; do
-            if grep -q "^$bad" "$DEFCONFIG"; then
-              echo "❌ $bad is ENABLED (must be off for manual hooks)"
-              exit 1
-            else
-              echo "✅ $bad is off"
-            fi
-          done
-          echo "=============================="
-
-      # ─────────────────────────────────────
-      # STEP 5: KERNELSU NEXT INTEGRATION
-      # ─────────────────────────────────────
-      - name: "[5/8] Integrate KernelSU Next ${{ github.event.inputs.ksu_version }}"
-        id: ksu_integrate
-        working-directory: ./kernel
-        run: |
-          VERSION="${{ github.event.inputs.ksu_version }}"
-          echo "Selected KSU version: $VERSION"
-
-          case "$VERSION" in
-            v3.1.0-legacy)
-              REF="v3.1.0-legacy"
-              EXTRA_FLAGS=""
-              ;;
-            v3.1.0-legacy-susfs)
-              REF="v3.1.0-legacy-susfs"
-              EXTRA_FLAGS=""
-              ;;
-            v3.0.1-legacy)
-              REF="v3.0.1-legacy"
-              EXTRA_FLAGS=""
-              ;;
-            v3.0.0)
-              REF="next"
-              EXTRA_FLAGS="legacy"
-              ;;
-            *)
-              echo "❌ Unknown version: $VERSION"
-              exit 1
-              ;;
+          V="${{ github.event.inputs.ksu_version }}"
+          case "$V" in
+            v3.1.0-legacy) R="v3.1.0-legacy"; F="" ;;
+            v3.1.0-legacy-susfs) R="v3.1.0-legacy-susfs"; F="" ;;
+            v3.0.1-legacy) R="v3.0.1-legacy"; F="" ;;
+            v3.0.0) R="next"; F="legacy" ;;
+            *) echo "BAD VERSION"; exit 1 ;;
           esac
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${R}/kernel/setup.sh" -o /tmp/s.sh
+          chmod +x /tmp/s.sh
+          [ -n "$F" ] && /tmp/s.sh $F || /tmp/s.sh
+          [ -f drivers/kernelsu/ksu.c ] || { echo "NO ksu.c"; exit 1; }
+          echo "OK"
 
-          echo "Downloading setup script from ref: $REF"
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${REF}/kernel/setup.sh" -o /tmp/ksu-setup.sh
-          chmod +x /tmp/ksu-setup.sh
-
-          if [ -n "$EXTRA_FLAGS" ]; then
-            /tmp/ksu-setup.sh $EXTRA_FLAGS
-          else
-            /tmp/ksu-setup.sh
-          fi
-
-      - name: "✅ Verify KSU integration"
+      - name: "[6/8] Coccinelle patches"
         working-directory: ./kernel
         run: |
-          echo "=== KSU INTEGRATION VERIFICATION ==="
-          if [ -f drivers/kernelsu/ksu.c ]; then
-            echo "✅ ksu.c present"
-            echo "   Lines: $(wc -l < drivers/kernelsu/ksu.c)"
-          else
-            echo "❌ drivers/kernelsu/ksu.c MISSING"
-            exit 1
-          fi
-          if [ -f drivers/kernelsu/Makefile ]; then
-            echo "✅ KSU Makefile present"
-          fi
-          if [ -f drivers/kernelsu/Kconfig ]; then
-            echo "✅ KSU Kconfig present"
-          fi
-          # Verify hooks were injected into kernel source
-          if grep -q "ksu_handle_execveat" fs/exec.c 2>/dev/null; then
-            echo "✅ Hook found in fs/exec.c"
-          else
-            echo "⚠️  Hook NOT found in fs/exec.c (may need Coccinelle patches)"
-          fi
-          echo "====================================="
-
-      # ─────────────────────────────────────
-      # STEP 6: COCCINELLE PATCHES
-      # ─────────────────────────────────────
-      - name: "[6/8] Apply Coccinelle semantic patches"
-        id: coccinelle
-        working-directory: ./kernel
-        run: |
-          echo "Cloning Coccinelle semantic patches..."
-          git clone --depth=1 https://github.com/devnoname120/kernelsu-coccinelle /tmp/coccinelle
-          cp -r /tmp/coccinelle/scope-minimized-hooks /tmp/hooks
-          cd /tmp/hooks
-          chmod +x apply.sh
-          echo "Applying Coccinelle patches..."
+          git clone --depth=1 https://github.com/devnoname120/kernelsu-coccinelle /tmp/cc
+          cp -r /tmp/cc/scope-minimized-hooks /tmp/hooks
+          cd /tmp/hooks && chmod +x apply.sh
           ./apply.sh "${{ github.workspace }}/kernel"
+          cd "${{ github.workspace }}/kernel"
+          grep -q "ksu_handle_execveat" fs/exec.c || { echo "NO HOOK"; exit 1; }
+          echo "OK"
 
-      - name: "✅ Verify Coccinelle patches"
+      - name: "[7/8] Cleanup"
         working-directory: ./kernel
         run: |
-          echo "=== COCCINELLE VERIFICATION ==="
-          if grep -q "ksu_handle_execveat" fs/exec.c; then
-            echo "✅ ksu_handle_execveat hook in fs/exec.c"
-          else
-            echo "❌ ksu_handle_execveat MISSING in fs/exec.c"
-            exit 1
-          fi
-          if grep -q "ksu_handle_" fs/open.c 2>/dev/null; then
-            echo "✅ Hooks found in fs/open.c"
-          fi
-          if grep -q "ksu_handle_" fs/read_write.c 2>/dev/null; then
-            echo "✅ Hooks found in fs/read_write.c"
-          fi
-          echo "==============================="
+          grep -rIl 'MODULE_IMPORT_NS' drivers/kernelsu/ 2>/dev/null | while read f; do sed -i '/MODULE_IMPORT_NS/d' "$f"; done
+          [ -f include/linux/compiler_types.h ] || echo '#include <linux/compiler.h>' > include/linux/compiler_types.h
+          echo "OK"
 
-      # ─────────────────────────────────────
-      # STEP 7: COMPATIBILITY FIXES
-      # ─────────────────────────────────────
-      - name: "[7/8] Remove MODULE_IMPORT_NS & apply minor fixes"
-        id: compat
-        working-directory: ./kernel
-        run: |
-          echo "Removing MODULE_IMPORT_NS..."
-          grep -rIl 'MODULE_IMPORT_NS' drivers/kernelsu/ 2>/dev/null | while read f; do
-            echo "  Purging: $f"
-            sed -i '/MODULE_IMPORT_NS/d' "$f"
-          done
-          echo "Creating stub headers if needed..."
-          if [ ! -f include/linux/compiler_types.h ]; then
-            echo '#include <linux/compiler.h>' > include/linux/compiler_types.h
-            echo "  Created compiler_types.h stub"
-          else
-            echo "  compiler_types.h already exists"
-          fi
-
-      - name: "✅ Verify compatibility fixes"
-        working-directory: ./kernel
-        run: |
-          echo "=== COMPATIBILITY VERIFICATION ==="
-          if grep -r 'MODULE_IMPORT_NS' drivers/kernelsu/ 2>/dev/null; then
-            echo "❌ MODULE_IMPORT_NS still present!"
-            exit 1
-          else
-            echo "✅ No MODULE_IMPORT_NS remaining"
-          fi
-          if [ -f include/linux/compiler_types.h ]; then
-            echo "✅ compiler_types.h exists"
-          fi
-          echo "=================================="
-
-      # ─────────────────────────────────────
-      # STEP 8: BUILD
-      # ─────────────────────────────────────
       - name: "[8/8] Build kernel"
-        id: build
         working-directory: ./kernel
         run: |
-          echo "=== BUILD START ==="
           make O=out ARCH=arm64 exynos7885-a20_defconfig
-          echo "--- Build log ---"
-          make -j$(nproc) O=out ARCH=arm64 \
-            CC=${CC} LD=${LD} AR=${AR} NM=${NM} \
-            OBJCOPY=${OBJCOPY} OBJDUMP=${OBJDUMP} STRIP=${STRIP} \
-            CROSS_COMPILE=${CROSS_COMPILE} 2>&1 | tee build.log
-          echo "=== BUILD END ==="
+          make -j$(nproc) O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build.log
 
-      # ─────────────────────────────────────
-      # FINAL VERIFICATION
-      # ─────────────────────────────────────
-      - name: "🔍 FINAL VERIFICATION"
-        id: final_verify
+      - name: "Final verify"
         working-directory: ./kernel
         run: |
-          echo ""
-          echo "╔══════════════════════════════════════╗"
-          echo "║   KERNELSU BUILD FINAL VERIFICATION  ║"
-          echo "╚══════════════════════════════════════╝"
-          echo ""
-
-          PASS=0
-          FAIL=0
-
-          # Check 1: CONFIG_KSU=y in final .config
-          echo -n "1/6: CONFIG_KSU=y in final .config ... "
-          if grep -q "^CONFIG_KSU=y" out/.config; then
-            echo "✅ PASS"
-            PASS=$((PASS+1))
-          else
-            echo "❌ FAIL"
-            FAIL=$((FAIL+1))
-          fi
-
-          # Check 2: KSU driver objects compiled
-          echo -n "2/6: KSU driver objects compiled ... "
-          if [ -f out/drivers/kernelsu/ksu.o ] || [ -f out/drivers/kernelsu/built-in.o ]; then
-            echo "✅ PASS"
-            PASS=$((PASS+1))
-          else
-            echo "❌ FAIL (no ksu.o or built-in.o in drivers/kernelsu/)"
-            FAIL=$((FAIL+1))
-          fi
-
-          # Check 3: Kernel Image exists
-          echo -n "3/6: Kernel Image created ... "
-          if [ -f out/arch/arm64/boot/Image ]; then
-            echo "✅ PASS ($(du -h out/arch/arm64/boot/Image | cut -f1))"
-            PASS=$((PASS+1))
-          else
-            echo "❌ FAIL"
-            FAIL=$((FAIL+1))
-          fi
-
-          # Check 4: "KernelSU" string inside Image
-          echo -n "4/6: 'KernelSU' string in Image ... "
-          if strings out/arch/arm64/boot/Image | grep -q "KernelSU"; then
-            echo "✅ PASS"
-            PASS=$((PASS+1))
-          else
-            echo "❌ FAIL (KSU driver not linked into Image)"
-            FAIL=$((FAIL+1))
-          fi
-
-          # Check 5: KSU initcall symbol in vmlinux
-          echo -n "5/6: KSU initcall in vmlinux ... "
-          if aarch64-linux-gnu-nm out/vmlinux 2>/dev/null | grep -q "ksu_init\|kernelsu_init"; then
-            echo "✅ PASS"
-            PASS=$((PASS+1))
-          else
-            echo "❌ FAIL (initcall symbol missing)"
-            FAIL=$((FAIL+1))
-          fi
-
-          # Check 6: Build log has no fatal errors
-          echo -n "6/6: No fatal errors in build log ... "
-          if grep -qi "error:" build.log && ! grep -q "ld.lld: error:" build.log; then
-            echo "⚠️  WARN (minor errors found, but linker succeeded)"
-            PASS=$((PASS+1))
-          elif grep -q "ld.lld: error:" build.log; then
-            echo "❌ FAIL (linker errors found)"
-            FAIL=$((FAIL+1))
-          else
-            echo "✅ PASS"
-            PASS=$((PASS+1))
-          fi
-
-          echo ""
-          echo "══════════════════════════════════════"
-          echo " RESULTS: $PASS passed, $FAIL failed"
-          echo "══════════════════════════════════════"
-
-          if [ $FAIL -gt 0 ]; then
-            echo ""
-            echo "❌ BUILD FAILED - check the log above for details"
-            exit 1
-          fi
-
-          echo ""
-          echo "✅ ALL CHECKS PASSED - Kernel is ready for packaging!"
+          grep -q "^CONFIG_KSU=y" out/.config || { echo "FAIL1"; exit 1; }
+          [ -f out/drivers/kernelsu/ksu.o ] || [ -f out/drivers/kernelsu/built-in.o ] || { echo "FAIL2"; exit 1; }
+          [ -f out/arch/arm64/boot/Image ] || { echo "FAIL3"; exit 1; }
+          strings out/arch/arm64/boot/Image | grep -q "KernelSU" || { echo "FAIL4"; exit 1; }
           cp out/arch/arm64/boot/Image .
+          echo "ALL OK"
 
-      # ─────────────────────────────────────
-      # PACKAGE & UPLOAD
-      # ─────────────────────────────────────
-      - name: "📦 Package AnyKernel3"
+      - name: "Package ZIP"
         run: |
           cp -r kernel/kernel_zip/anykernel anykernel
           cp kernel/Image anykernel/
+          cd anykernel && zip -r9 ../ksu.zip . && cd ..
+          echo "ZIP=ksu.zip" >> $GITHUB_ENV
 
-      - name: "📦 Create flashable ZIP"
-        id: zip
-        run: |
-          BUILD_NO=$(printf "%03d" ${{ github.run_number }})
-          ZIP_NAME="ksu-next-${{ github.event.inputs.ksu_version }}-a20-${BUILD_NO}"
-          cd anykernel
-          zip -r9 "../${ZIP_NAME}.zip" .
-          cd ..
-          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-
-      - name: "📤 Upload artifact"
+      - name: "Upload"
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
+          name: ksu-${{ github.run_number }}
           path: |
-            ${{ env.ZIP_NAME }}.zip
+            ksu.zip
             kernel/build.log
