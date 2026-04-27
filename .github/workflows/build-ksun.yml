@@ -183,6 +183,24 @@ jobs:
           [ -f include/linux/compiler_types.h ] || echo '#include <linux/compiler.h>' > include/linux/compiler_types.h
           echo "OK"
 
+      - name: "🔍 Diagnostic: Show syscall definitions"
+        working-directory: ./kernel
+        run: |
+          echo "=== exec.c execveat definition ==="
+          grep -n "SYSCALL_DEFINE.*execveat" fs/exec.c || echo "NOT FOUND"
+          echo ""
+          echo "=== open.c open definition ==="
+          grep -n "SYSCALL_DEFINE.*open" fs/open.c || echo "NOT FOUND"
+          echo ""
+          echo "=== read_write.c read definition ==="
+          grep -n "SYSCALL_DEFINE.*read" fs/read_write.c || echo "NOT FOUND"
+          echo ""
+          echo "=== stat.c newstat definition ==="
+          grep -n "SYSCALL_DEFINE.*newstat" fs/stat.c || echo "NOT FOUND"
+          echo ""
+          echo "=== fork.c clone definition ==="
+          grep -n "SYSCALL_DEFINE.*clone" kernel/fork.c || echo "NOT FOUND"
+      
       - name: "[8/8] Build kernel"
         working-directory: ./kernel
         run: |
