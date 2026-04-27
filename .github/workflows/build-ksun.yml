@@ -37,11 +37,19 @@ jobs:
       - name: "[1/8] Install dependencies"
         run: |
           sudo apt update -qq
-          sudo apt install -y bc bison flex libssl-dev make git python3 cpio gcc-aarch64-linux-gnu
-          # Ubuntu 24.04 requires universe for coccinelle
-          sudo add-apt-repository -y universe
-          sudo apt update -qq
-          sudo apt install -y coccinelle
+          sudo apt install -y bc bison flex libssl-dev make git python3 cpio gcc-aarch64-linux-gnu python3-pip
+          # Coccinelle via apt may fail on some Ubuntu versions; use pip instead
+          pip3 install coccinelle || sudo apt install -y coccinelle || {
+            echo "Coccinelle install failed – installing from source as fallback"
+            sudo apt install -y ocaml ocaml-findlib libpcre-ocaml-dev pkg-config
+            git clone --depth=1 https://github.com/coccinelle/coccinelle.git /tmp/coccinelle-src
+            cd /tmp/coccinelle-src
+            ./autogen
+            ./configure
+            make -j$(nproc)
+            sudo make install
+            cd -
+          }
 
       - name: "Verify deps"
         run: |
