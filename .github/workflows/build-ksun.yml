@@ -231,6 +231,10 @@ jobs:
           sed -i '/^extern int ksu_handle_execveat/d' fs/exec.c 2>/dev/null || true
           echo "Cleaned up old KSU externs"
           
+          # Also remove the orphaned ksu_handle_stat() call left by the old KSU integration
+          sed -i '/ksu_handle_stat(/d' fs/stat.c
+          echo "Old ksu_handle_stat call removed from fs/stat.c"
+          
           # reboot hook
           if ! grep -q 'kernelsu_hook.h' kernel/reboot.c; then
             sed -i '1i #include <linux/kernelsu_hook.h>' kernel/reboot.c
