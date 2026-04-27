@@ -126,9 +126,7 @@ jobs:
           cp -r /tmp/ksu-src/kernel/* drivers/kernelsu/
                 
           # Run official setup.sh (legacy mode)
-          cd drivers/kernelsu
-          bash setup.sh legacy
-          cd ../..
+          bash drivers/kernelsu/setup.sh legacy
       
           # Replace module Makefile with in-tree Kbuild
           cat > drivers/kernelsu/Kbuild << 'EOF'
