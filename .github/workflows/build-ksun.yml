@@ -122,13 +122,38 @@ jobs:
             /tmp/ksu-setup.sh legacy || echo "setup.sh returned non-zero, continuing..."
           fi
 
-          # Ensure hook header is accessible
-          if [ -f drivers/kernelsu/kernelsu_hook.h ]; then
-            ln -sf "$(pwd)/drivers/kernelsu/kernelsu_hook.h" include/linux/kernelsu_hook.h
-            echo "Symlinked kernelsu_hook.h to include/linux/"
-          else
-            echo "⚠️ kernelsu_hook.h not found in driver"
-          fi
+          # kernelsu_hook.h is missing from the release – create it with real prototypes
+          cat > include/linux/kernelsu_hook.h << 'HEADEREOF'
+          /* SPDX-License-Identifier: GPL-2.0 */
+          #ifndef _LINUX_KERNELSU_HOOK_H
+          #define _LINUX_KERNELSU_HOOK_H
+
+          #include <linux/types.h>
+          #include <linux/sched.h>
+
+          /* syscall hooks – implemented in drivers/kernelsu */
+          int ksu_handle_execveat(const char __user *filename,
+                                  const char __user *const __user *argv,
+                                  const char __user *const __user *envp,
+                                  int flags);
+          int ksu_handle_open(const struct filename **filename,
+                             int flags, umode_t mode);
+          int ksu_handle_read(unsigned int fd, char __user *buf,
+                             size_t count);
+          int ksu_handle_stat(const char __user *filename,
+                             struct kstat *statbuf);
+          int ksu_handle_clone(unsigned long clone_flags,
+                              unsigned long newsp,
+                              int __user *parent_tidptr,
+                              int __user *child_tidptr,
+                              unsigned long tls);
+          int ksu_handle_sys_reboot(int magic1, int magic2,
+                                    unsigned int cmd,
+                                    void __user *arg);
+
+          #endif /* _LINUX_KERNELSU_HOOK_H */
+          HEADEREOF
+          echo "Created include/linux/kernelsu_hook.h with real prototypes"
 
           # Python script to inject hooks after the opening brace of syscall definitions
           python3 << 'PYEOF'
