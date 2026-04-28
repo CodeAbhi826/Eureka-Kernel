@@ -134,7 +134,7 @@ jobs:
           echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
           echo "ccflags-y += -Wno-incompatible-pointer-types-discards-qualifiers" >> drivers/kernelsu/Kbuild
           echo 'ccflags-y += -DKSU_VERSION=30000' >> drivers/kernelsu/Kbuild
-          echo 'ccflags-y += -DKSU_VERSION_TAG="v3.1.0-legacy"' >> drivers/kernelsu/Kbuild
+          echo "ccflags-y += -DKSU_VERSION_TAG=\"v3.1.0-legacy\"" >> drivers/kernelsu/Kbuild
 
           # Remove the external‑module Makefile so in‑tree build works
           rm -f drivers/kernelsu/Makefile
