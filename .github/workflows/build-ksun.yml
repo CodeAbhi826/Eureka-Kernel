@@ -128,33 +128,21 @@ jobs:
 
           # In‑tree Kbuild
           cat > drivers/kernelsu/Kbuild << 'KBUILDEOF'
-          kernelsu-objs := ksu.o
-          kernelsu-objs += allowlist.o
-          kernelsu-objs += app_profile.o
-          kernelsu-objs += apk_sign.o
-          kernelsu-objs += sucompat.o
-          kernelsu-objs += syscall_hook_manager.o
-          kernelsu-objs += throne_tracker.o
-          kernelsu-objs += pkg_observer.o
-          kernelsu-objs += setuid_hook.o
-          kernelsu-objs += lsm_hooks.o
-          kernelsu-objs += kernel_compat.o
-          kernelsu-objs += kernel_umount.o
-          kernelsu-objs += supercalls.o
-          kernelsu-objs += su_mount_ns.o
-          kernelsu-objs += feature.o
-          kernelsu-objs += ksud.o
-          kernelsu-objs += seccomp_cache.o
-          kernelsu-objs += file_wrapper.o
-          kernelsu-objs += util.o
-          kernelsu-objs += extras.o
-          kernelsu-objs += selinux/selinux.o
-          kernelsu-objs += selinux/sepolicy.o
-          kernelsu-objs += selinux/rules.o
-          obj-$(CONFIG_KSU) += kernelsu.o
-          KBUILDEOF
+          # Use the driver's own Kbuild, just add our backport and suppress strict-prototypes
+          if [ -f drivers/kernelsu/Kbuild ]; then
+            # Add backport object if not already there
+            if ! grep -q 'compat_backport.o' drivers/kernelsu/Kbuild; then
+              echo "obj-y += compat_backport.o" >> drivers/kernelsu/Kbuild
+            fi
+            # Suppress strict-prototypes warnings
+            echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
+            echo "Kbuild updated"
+          else
+            echo "❌ drivers/kernelsu/Kbuild missing – cannot proceed"
+            exit 1
+          fi
+          # Remove the external‑module Makefile so in‑tree build works
           rm -f drivers/kernelsu/Makefile
-          echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
 
           # Backport kvmalloc/kvfree
           cat > drivers/kernelsu/compat_backport.c << 'BACKPORTEOF'
