@@ -105,187 +105,174 @@ jobs:
           # Enable KSU internal debug prints
           grep -q "CONFIG_KSU_DEBUG=y" "$D" || echo "CONFIG_KSU_DEBUG=y" >> "$D"
                     
-      - name: "[5/8] Integrate KSU Next Legacy"
+      - name: "[5/8] Clean old hooks + integrate KSU Next (official manual method)"
+        working-directory: ./kernel
         run: |
           V="${{ github.event.inputs.ksu_version }}"
           V="${V:-v3.1.0-legacy}"
-          echo "Using KSU version: ${V}"
-      
+          echo "Using KSU version: $V"
+          rm -rf drivers/kernelsu KernelSU-Next
+
           # Download driver
+          curl -L "https://github.com/KernelSU-Next/KernelSU-Next/archive/refs/tags/${V}.tar.gz" -o /tmp/ksu.tar.gz
           mkdir -p /tmp/ksu-src
-          curl -L "https://github.com/KernelSU-Next/KernelSU-Next/archive/refs/tags/${V}.tar.gz" | tar xz -C /tmp/ksu-src --strip-components=1
-          # Ensure source exists
-          if [ ! -d /tmp/ksu-src/kernel ]; then
-            echo "ERROR: /tmp/ksu-src/kernel not found – tarball extraction may have failed"
-            ls -la /tmp/ksu-src/
-            exit 1
+          tar xzf /tmp/ksu.tar.gz -C /tmp/ksu-src --strip-components=1
+          cp -r /tmp/ksu-src/kernel drivers/kernelsu
+
+          # Run official setup.sh (patches drivers/Makefile, Kconfig, selinux backports, etc.)
+          if [ -f /tmp/ksu-src/kernel/setup.sh ]; then
+            cp /tmp/ksu-src/kernel/setup.sh /tmp/ksu-setup.sh
+            chmod +x /tmp/ksu-setup.sh
+            /tmp/ksu-setup.sh legacy || echo "setup.sh returned non-zero, continuing..."
           fi
-          
-          # Create destination tree (handles missing drivers/ gracefully)
-          mkdir -p drivers/kernelsu
-          cp -r /tmp/ksu-src/kernel/* drivers/kernelsu/
-                
-          # Run official setup.sh (legacy mode)
-          # --- Manual KSU Next setup (replaces setup.sh which changes directory) ---
-          # 1. Add kernelsu to the kernel's driver build system
-          if ! grep -q 'CONFIG_KSU' drivers/Makefile 2>/dev/null; then
-            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
-          fi
-          if ! grep -q 'kernelsu/Kconfig' drivers/Kconfig 2>/dev/null; then
-            echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-          fi
-          
-          # 2. Symlink KSU headers so #include <linux/kernelsu/*> works
-          if [ ! -e include/linux/kernelsu ]; then
-            ln -sf ../../drivers/kernelsu/include/kernelsu include/linux/kernelsu
-          fi
-          # -----------------------------------------------------------------------
-      
-          # Replace module Makefile with in-tree Kbuild
-          cat > drivers/kernelsu/Kbuild << 'EOF'
+
+          # In‑tree Kbuild
+          cat > drivers/kernelsu/Kbuild << 'KBUILDEOF'
+          kernelsu-objs := ksu.o
+          kernelsu-objs += allowlist.o
+          kernelsu-objs += app_profile.o
+          kernelsu-objs += apk_sign.o
+          kernelsu-objs += sucompat.o
+          kernelsu-objs += syscall_hook_manager.o
+          kernelsu-objs += throne_tracker.o
+          kernelsu-objs += pkg_observer.o
+          kernelsu-objs += setuid_hook.o
+          kernelsu-objs += lsm_hooks.o
+          kernelsu-objs += kernel_compat.o
+          kernelsu-objs += kernel_umount.o
+          kernelsu-objs += supercalls.o
+          kernelsu-objs += su_mount_ns.o
+          kernelsu-objs += feature.o
+          kernelsu-objs += ksud.o
+          kernelsu-objs += seccomp_cache.o
+          kernelsu-objs += file_wrapper.o
+          kernelsu-objs += util.o
+          kernelsu-objs += extras.o
+          kernelsu-objs += selinux/selinux.o
+          kernelsu-objs += selinux/sepolicy.o
+          kernelsu-objs += selinux/rules.o
           obj-$(CONFIG_KSU) += kernelsu.o
-          kernelsu-objs := core/kernel_compat.o core/ksud.o core/selinux/selinux.o \
-                           core/selinux/sepolicy.o core/selinux/rules.o \
-                           core/selinux/avc.o core/selinux/ss/services.o \
-                           core/selinux/ss/policydb.o core/selinux/ss/avtab.o \
-                           core/selinux/ss/sidtab.o core/selinux/ss/context.o \
-                           core/selinux/ss/mls.o core/selinux/ss/ebitmap.o \
-                           core/selinux/ss/hashtab.o core/selinux/ss/symtab.o \
-                           core/selinux/ss/status.o core/suid/suid.o \
-                           core/module/misc.o core/uid_inode_map.o \
-                           core/module/ksud_socket.o core/apk_sign.o \
-                           compat_backport.o
-          EOF
+          KBUILDEOF
           rm -f drivers/kernelsu/Makefile
-      
-          # kvmalloc/kvfree backport
-          cat > drivers/kernelsu/compat_backport.c << 'EOF'
-          #include <linux/slab.h>
-          #include <linux/vmalloc.h>
+
+          # Backport kvmalloc/kvfree
+          cat > drivers/kernelsu/compat_backport.c << 'BACKPORTEOF'
           #include <linux/mm.h>
-          #include <linux/gfp.h>
-      
-          void *kvmalloc(size_t size, gfp_t flags)
-          {
+          #include <linux/vmalloc.h>
+          #include <linux/slab.h>
+          void *kvmalloc(size_t size, gfp_t flags) {
               void *ret;
-              if (size > PAGE_SIZE) {
-                  ret = __vmalloc(size, flags, PAGE_KERNEL);
-                  if (ret) return ret;
-              }
-              ret = kmalloc(size, flags | __GFP_NOWARN);
-              if (!ret && size > PAGE_SIZE)
-                  ret = __vmalloc(size, flags, PAGE_KERNEL);
+              if (size <= PAGE_SIZE) ret = kmalloc(size, flags | __GFP_NOWARN);
+              else ret = vmalloc(size);
+              if (!ret && (size > PAGE_SIZE || !(flags & __GFP_NOWARN))) ret = vmalloc(size);
               return ret;
           }
-      
-          void kvfree(const void *addr)
-          {
-              if (is_vmalloc_addr(addr))
-                  vfree(addr);
-              else
-                  kfree(addr);
+          void kvfree(const void *addr) {
+              if (is_vmalloc_addr(addr)) vfree(addr);
+              else kfree(addr);
           }
-          EOF
-      
-          # Remove MODULE_IMPORT_NS and stub compiler_types.h
-          find drivers/kernelsu -type f -name '*.c' -exec sed -i 's/MODULE_IMPORT_NS(.*);//' {} \;
-          find drivers/kernelsu -type f -name '*.h' -exec sed -i 's/MODULE_IMPORT_NS(.*);//' {} \;
-          mkdir -p include/linux
-          if [ ! -f include/linux/compiler_types.h ]; then
-            touch include/linux/compiler_types.h
-          fi
-      
-          # Create hook header with real prototypes
-          cat > include/linux/kernelsu_hook.h << 'EOF'
-          #ifndef _LINUX_KERNELSU_HOOK_H
-          #define _LINUX_KERNELSU_HOOK_H
-          int ksu_handle_execveat(const char __user *filename,
-                                  const char __user *const __user *argv,
-                                  const char __user *const __user *envp, int flags);
-          int ksu_handle_open(int dfd, const char __user *filename, int flags, umode_t mode);
-          int ksu_handle_read(unsigned int fd, char __user *buf, size_t count);
-          int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
-          int ksu_handle_clone(unsigned long clone_flags, unsigned long newsp,
-                               int __user *parent_tidptr, int __user *child_tidptr, unsigned long tls);
-          int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
+          BACKPORTEOF
+          echo "obj-y += compat_backport.o" >> drivers/kernelsu/Kbuild
+
+          # Cleanup
+          grep -rIl 'MODULE_IMPORT_NS' drivers/kernelsu/ 2>/dev/null | while read f; do
+            sed -i '/MODULE_IMPORT_NS/d' "$f"
+          done
+          [ -f include/linux/compiler_types.h ] || echo '#include <linux/compiler.h>' > include/linux/compiler_types.h
+
+          # ── Remove ALL previous hook injections (ours and old KSU) ──
+          echo "Cleaning all previous hooks..."
+          for f in fs/exec.c fs/open.c fs/read_write.c fs/stat.c kernel/reboot.c drivers/input/input.c; do
+            # Remove lines referencing kernelsu_hook.h
+            sed -i '/kernelsu_hook.h/d' "$f" 2>/dev/null || true
+            # Remove lines with ksu_handle_ calls
+            sed -i '/ksu_handle_/d' "$f" 2>/dev/null || true
+            # Remove old extern declarations for KSU
+            sed -i '/^extern.*ksu_/d' "$f" 2>/dev/null || true
+            # Remove old #ifdef CONFIG_KSU / #endif blocks (single-line only)
+            sed -i '/#ifdef CONFIG_KSU/d' "$f" 2>/dev/null || true
+            sed -i '/#endif.*CONFIG_KSU/d' "$f" 2>/dev/null || true
+          done
+          echo "All previous hooks cleaned"
+
+          # ── Apply official KSU Next manual hooks ──
+          echo "Applying official KSU Next hooks..."
+
+          # 1) fs/exec.c → do_execve (add before return do_execveat_common)
+          sed -i '/^int do_execve(struct filename \*filename,$/{
+            N;N;N;N;N
+            /return do_execveat_common/{ 
+              i\
+          #ifdef CONFIG_KSU\
+          \tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\
           #endif
-          EOF
-      
-          # Inject hooks (exec, open, read, fork)
-          python3 << 'PYEOF'
-          import re
-      
-          # fs/exec.c
-          with open('fs/exec.c', 'r') as f:
-              exec_c = f.read()
-          hook = '\tint ksu = ksu_handle_execveat(filename, argv, envp, flags);\n\tif (unlikely(ksu)) return ksu;\n'
-          exec_c = re.sub(r'(\tstruct task_struct \*tsk = current;\n)', r'\1' + hook, exec_c, count=1)
-          with open('fs/exec.c', 'w') as f:
-              f.write(exec_c)
-      
-          # fs/open.c
-          with open('fs/open.c', 'r') as f:
-              open_c = f.read()
-          hook = '\tint ksu = ksu_handle_open(AT_FDCWD, filename, flags, mode);\n\tif (unlikely(ksu)) return ksu;\n'
-          open_c = re.sub(r'(\tint op = flags & O_TMPFILE \? )', r'\1' + hook, open_c, count=1)
-          with open('fs/open.c', 'w') as f:
-              f.write(open_c)
-      
-          # fs/read_write.c
-          with open('fs/read_write.c', 'r') as f:
-              rw_c = f.read()
-          hook = '\tint ksu = ksu_handle_read(fd, buf, count);\n\tif (unlikely(ksu)) return ksu;\n'
-          rw_c = re.sub(r'(\tssize_t ret = -EBADF;\n)', r'\1' + hook, rw_c, count=1)
-          with open('fs/read_write.c', 'w') as f:
-              f.write(rw_c)
-      
-          # kernel/fork.c
-          with open('kernel/fork.c', 'r') as f:
-              fork_c = f.read()
-          hook = '\tint ksu = ksu_handle_clone(clone_flags, newsp, parent_tidptr, child_tidptr, tls);\n\tif (unlikely(ksu)) return ksu;\n'
-          fork_c = re.sub(r'(\tu64 __maybe_unused tls_space\[2\];\n)', r'\1' + hook, fork_c, count=1)
-          with open('kernel/fork.c', 'w') as f:
-              f.write(fork_c)
-          PYEOF
-      
-          # ---------- Clean old KSU externs (bulletproof version) ----------
-          # Remove entire old extern block (single or multi-line)
-          awk 'BEGIN{skip=0}
-               /extern int ksu_handle_execveat/ {skip=1}
-               skip && /\);$/ {skip=0; next}
-               !skip' fs/exec.c > fs/exec.c.tmp && mv fs/exec.c.tmp fs/exec.c
-      
-          # Purge old call with the broken signature
-          sed -i '/ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags)/d' fs/exec.c
-      
-          # Remove old stat hook extern and its usage
-          sed -i '/^extern int ksu_handle_stat/d' fs/stat.c
-          sed -i '/ksu_handle_stat(/d' fs/stat.c
-      
-          # Remove old open/read externs
-          sed -i '/^extern int ksu_handle_open/d' fs/open.c
-          sed -i '/^extern int ksu_handle_read/d' fs/read_write.c
-          # -----------------------------------------------------------------
-      
-          # Inject reboot hook (separate script, no indentation issues)
-          python3 << 'PYEOF2'
-          with open('kernel/reboot.c', 'r') as f:
-              rb = f.read()
-          import re
-          hook = '\tint ksu = ksu_handle_sys_reboot(magic1, magic2, cmd, arg);\n\tif (unlikely(ksu)) return ksu;\n'
-          rb = re.sub(r'(\tif \(cmd >= LINUX_REBOOT_CMD_MAX\)\n\t\treturn -EINVAL;\n)', r'\1' + hook, rb, count=1)
-          with open('kernel/reboot.c', 'w') as f:
-              f.write(rb)
-          PYEOF2
-      
-          # Final verification
-          echo "Checking hooks..."
-          grep -q "ksu_handle_execveat(filename, argv, envp, flags)" fs/exec.c && echo "✓ exec hook present" || echo "✗ MISSING exec hook"
-          grep -q "ksu_handle_open(AT_FDCWD, filename, flags, mode)" fs/open.c && echo "✓ open hook present" || echo "✗ MISSING open hook"
-          grep -q "ksu_handle_read(fd, buf, count)" fs/read_write.c && echo "✓ read hook present" || echo "✗ MISSING read hook"
-          grep -q "ksu_handle_clone(clone_flags, newsp, parent_tidptr, child_tidptr, tls)" kernel/fork.c && echo "✓ clone hook present" || echo "✗ MISSING clone hook"
-          grep -q "ksu_handle_sys_reboot(magic1, magic2, cmd, arg)" kernel/reboot.c && echo "✓ reboot hook present" || echo "✗ MISSING reboot hook"
-          echo "✅ All hooks present and driver ready for in‑tree build"
+                      }
+                    }' fs/exec.c
+                    echo "Patched fs/exec.c (do_execve)"
+          
+                    # 2) fs/open.c → faccessat (add after lookup_flags init)
+                    sed -i '/unsigned int lookup_flags = LOOKUP_FOLLOW;/a\
+          #ifdef CONFIG_KSU\
+          \tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\
+          #endif' fs/open.c
+                    echo "Patched fs/open.c (faccessat)"
+          
+                    # 3) fs/read_write.c → SYSCALL_DEFINE3(read...)
+                    sed -i '/SYSCALL_DEFINE3(read, unsigned int, fd, char __user \*, buf, size_t, count)/{
+                      /struct fd f = fdget_pos/{
+                        i\
+          #ifdef CONFIG_KSU\
+          \tif (unlikely(ksu_vfs_read_hook))\
+          \t\tksu_handle_sys_read(fd, &buf, &count);\
+          #endif
+                      }
+                    }' fs/read_write.c
+                    echo "Patched fs/read_write.c (read)"
+          
+                    # 4) fs/stat.c → newfstatat (add after kstat stat; int error;)
+                    sed -i '/struct kstat stat;/{
+                      N
+                      /int error;/{
+                        a\
+          #ifdef CONFIG_KSU\
+          \tksu_handle_stat(&dfd, &filename, &flag);\
+          #endif
+                      }
+                    }' fs/stat.c
+                    echo "Patched fs/stat.c (newfstatat)"
+          
+                    # 5) kernel/reboot.c → SYSCALL_DEFINE4(reboot...)
+                    sed -i '/SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,$/{
+                      N
+                      /void __user \*, arg)/{
+                        /struct pid_namespace/{
+                          i\
+          #ifdef CONFIG_KSU\
+          \tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\
+          #endif
+                        }
+                      }
+                    }' kernel/reboot.c
+                    echo "Patched kernel/reboot.c (reboot)"
+          
+                    # Verify hooks
+                    for check in \
+                      'fs/exec.c:ksu_handle_execveat' \
+                      'fs/open.c:ksu_handle_faccessat' \
+                      'fs/read_write.c:ksu_handle_sys_read' \
+                      'fs/stat.c:ksu_handle_stat' \
+                      'kernel/reboot.c:ksu_handle_sys_reboot'; do
+                      f="${check%%:*}"
+                      s="${check##*:}"
+                      if grep -q "$s" "$f"; then
+                        echo "  ✅ $f: $s"
+                      else
+                        echo "  ❌ $f: $s MISSING"
+                        exit 1
+                      fi
+                    done
+
+          echo "✅ Official KSU Next hooks applied"
           
       - name: "🔍 Check driver build integration"
         working-directory: ./kernel
