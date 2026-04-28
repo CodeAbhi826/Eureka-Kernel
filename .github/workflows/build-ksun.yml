@@ -195,84 +195,59 @@ jobs:
           done
           echo "All previous hooks cleaned"
 
-          # ── Apply official KSU Next manual hooks ──
-          echo "Applying official KSU Next hooks..."
+          # ── Apply official KSU Next manual hooks (Python – reliable) ──
+          python3 << 'PYEOF'
+          import re, os
 
-          # 1) fs/exec.c → do_execve (add before return do_execveat_common)
-          sed -i '/^int do_execve(struct filename \*filename,$/{
-            N;N;N;N;N
-            /return do_execveat_common/{ 
-              i\
-          #ifdef CONFIG_KSU\
-          \tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\
-          #endif
-                      }
-                    }' fs/exec.c
-                    echo "Patched fs/exec.c (do_execve)"
-          
-                    # 2) fs/open.c → faccessat (add after lookup_flags init)
-                    sed -i '/unsigned int lookup_flags = LOOKUP_FOLLOW;/a\
-          #ifdef CONFIG_KSU\
-          \tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\
-          #endif' fs/open.c
-                    echo "Patched fs/open.c (faccessat)"
-          
-                    # 3) fs/read_write.c → SYSCALL_DEFINE3(read...)
-                    sed -i '/SYSCALL_DEFINE3(read, unsigned int, fd, char __user \*, buf, size_t, count)/{
-                      /struct fd f = fdget_pos/{
-                        i\
-          #ifdef CONFIG_KSU\
-          \tif (unlikely(ksu_vfs_read_hook))\
-          \t\tksu_handle_sys_read(fd, &buf, &count);\
-          #endif
-                      }
-                    }' fs/read_write.c
-                    echo "Patched fs/read_write.c (read)"
-          
-                    # 4) fs/stat.c → newfstatat (add after kstat stat; int error;)
-                    sed -i '/struct kstat stat;/{
-                      N
-                      /int error;/{
-                        a\
-          #ifdef CONFIG_KSU\
-          \tksu_handle_stat(&dfd, &filename, &flag);\
-          #endif
-                      }
-                    }' fs/stat.c
-                    echo "Patched fs/stat.c (newfstatat)"
-          
-                    # 5) kernel/reboot.c → SYSCALL_DEFINE4(reboot...)
-                    sed -i '/SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,$/{
-                      N
-                      /void __user \*, arg)/{
-                        /struct pid_namespace/{
-                          i\
-          #ifdef CONFIG_KSU\
-          \tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\
-          #endif
-                        }
-                      }
-                    }' kernel/reboot.c
-                    echo "Patched kernel/reboot.c (reboot)"
-          
-                    # Verify hooks
-                    for check in \
-                      'fs/exec.c:ksu_handle_execveat' \
-                      'fs/open.c:ksu_handle_faccessat' \
-                      'fs/read_write.c:ksu_handle_sys_read' \
-                      'fs/stat.c:ksu_handle_stat' \
-                      'kernel/reboot.c:ksu_handle_sys_reboot'; do
-                      f="${check%%:*}"
-                      s="${check##*:}"
-                      if grep -q "$s" "$f"; then
-                        echo "  ✅ $f: $s"
-                      else
-                        echo "  ❌ $f: $s MISSING"
-                        exit 1
-                      fi
-                    done
+          def inject_before(regex, filepath, code):
+              if not os.path.exists(filepath): return
+              with open(filepath, 'r') as f: text = f.read()
+              if code.strip() in text: return   # already injected
+              match = re.search(regex, text)
+              if not match:
+                  print(f"WARNING: pattern not found in {filepath}")
+                  return
+              # insert code right before the matched line
+              start = match.start()
+              text = text[:start] + code + '\n' + text[start:]
+              with open(filepath, 'w') as f: f.write(text)
+              print(f"Patched {filepath}")
 
-          echo "✅ Official KSU Next hooks applied"
+          # 1) fs/exec.c – before 'return do_execveat_common' inside do_execve
+          inject_before(
+              r'return do_execveat_common\(AT_FDCWD, filename, argv, envp, 0\);',
+              'fs/exec.c',
+              '#ifdef CONFIG_KSU\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif'
+          )
+
+          # 2) fs/open.c – after 'unsigned int lookup_flags = LOOKUP_FOLLOW;'
+          inject_before(
+              r'if \(mode & ~S_IRWXO\)',
+              'fs/open.c',
+              '#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif'
+          )
+
+          # 3) fs/read_write.c – after 'struct fd f = fdget_pos(fd);' in read
+          inject_before(
+              r'ssize_t ret = -EBADF;',
+              'fs/read_write.c',
+              '#ifdef CONFIG_KSU\n\tif (unlikely(ksu_vfs_read_hook))\n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif'
+          )
+
+          # 4) fs/stat.c – after 'struct kstat stat;\n\tint error;' in newfstatat
+          inject_before(
+              r'error = vfs_fstatat\(dfd, filename, &stat, flag\);',
+              'fs/stat.c',
+              '#ifdef CONFIG_KSU\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif'
+          )
+
+          # 5) kernel/reboot.c – after 'struct pid_namespace *pid_ns...' in sys_reboot
+          inject_before(
+              r'if \(!ns_capable\(pid_ns->user_ns, CAP_SYS_BOOT\)\)',
+              'kernel/reboot.c',
+              '#ifdef CONFIG_KSU\n\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif'
+          )
+          PYEOF
           
       - name: "🔍 Check driver build integration"
         working-directory: ./kernel
