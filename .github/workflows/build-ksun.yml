@@ -354,31 +354,28 @@ jobs:
       - name: "📦 Create flashable AnyKernel3 ZIP"
         working-directory: ./kernel
         run: |
-          # Build the default version string (from input or fallback)
           VERSION="${{ github.event.inputs.ksu_version }}"
           VERSION="${VERSION:-v3.1.0-legacy}"
           BUILD_NO=$(printf "%03d" ${{ github.run_number }})
-          ZIP_NAME="ksu-next-${VERSION}-a20-${BUILD_NO}"
-      
+          ZIP_NAME="Eureka-KSU-Next-${VERSION}-a20-${BUILD_NO}"
+
           # Clone official AnyKernel3 template
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 /tmp/anykernel
-      
-          # Copy the kernel image into the template
+
+          # Copy kernel image
           cp out/arch/arm64/boot/Image /tmp/anykernel/
-      
-          # Update anykernel.sh with device properties
+
+          # Write anykernel.sh with Eureka‑style TWRP messages
           cat > /tmp/anykernel/anykernel.sh << 'AKEOF'
+          ##############################################################
           # AnyKernel3 script for Galaxy A20 (Exynos 7885 / r0s)
-          # device.name1=a20
-          # device.name2=a20e
-          # device.name3=a20s
-          # device.name4=r0s
-          # block=/dev/block/platform/13500000.dwmmc0/by-name/BOOT
-          # is_slot_device=0
-      
-          ## AnyKernel setup
+          # Based on Eureka Kernel's script – adapted for KSU‑Next
+          ##############################################################
+
+          ### AnyKernel setup
           # begin properties
-          kernel.string=KSU-Next Legacy
+          properties() { '
+          kernel.string=Eureka Kernel with KernelSU Next
           do.devicecheck=1
           do.modules=0
           do.systemless=1
@@ -390,39 +387,74 @@ jobs:
           device.name4=r0s
           supported.versions=9 - 14
           supported.patchlevels=2019-07 - 2025-01
-          # end properties
-      
-          # shell variables
-          block=/dev/block/platform/13500000.dwmmc0/by-name/BOOT;
-          is_slot_device=0;
-          ramdisk_compression=auto;
-      
-          ## AnyKernel methods (DO NOT CHANGE)
-          # import the ak3-core.sh script
-          . /tmp/anykernel/tools/ak3-core.sh;
-      
+          '; } # end properties
+
+          # boot shell variables
+          BLOCK=auto;                         # auto‑detect boot partition
+          IS_SLOT_DEVICE=0;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          # import AK3 core
+          . tools/ak3-core.sh;
+
+          # ── Custom TWRP banner (matches Eureka style) ──
+          ui_print " ";
+          ui_print "************************************************";
+          ui_print " ___________                     __            ";
+          ui_print " \_   _____/__ _________   ____ |  | _______   ";
+          ui_print "  |    __)_|  |  \_  __ \_/ __ \|  |/ /\__  \  ";
+          ui_print "  |        \  |  /|  | \/\  ___/|    <  / __ \_";
+          ui_print " /_______  /____/ |__|    \___  >__|_ \(____  /";
+          ui_print "         \/                   \/     \/     \/ ";
+          ui_print "                                                ";
+          ui_print "************************************************";
+          ui_print " Source      : Eureka R15‑OneUI Kernel           ";
+          ui_print " Version     : $VERSION                          ";
+          ui_print " Chipset     : Exynos 7885 with Mali G71 MP2     ";
+          ui_print " Android     : OneUI & AOSP ROMs & GSIs          ";
+          ui_print " Developer   : Eureka Team & CodeAbhi826        ";
+          ui_print " Support     : @eureka_support_group on Telegram ";
+          ui_print "************************************************";
+          ui_print "          KernelSU Next Integration              ";
+          ui_print "************************************************";
+          ui_print " - KernelSU Next v3.1.0‑legacy integrated        ";
+          ui_print " - Manual hooks for non‑GKI 4.4 kernel            ";
+          ui_print " - Backported kvmalloc/kvfree for compatibility   ";
+          ui_print " - SELinux compatibility patches applied          ";
+          ui_print " - Compiled with Neutron Clang                    ";
+          ui_print "************************************************";
+          ui_print " ";
+
           ## AnyKernel install
           split_boot;
-      
+          ui_print "- Flashing kernel with KSU Next";
           flash_boot;
-          flash_dtbo;
-      
+
+          ui_print "- Installation finished successfully";
+          ui_print " ";
+          ui_print "- Thank you for using Eureka Kernel with KernelSU Next :)";
+          ui_print " ";
           ## end install
           AKEOF
-      
-          # Create the ZIP
+
+          # Create ZIP
           cd /tmp/anykernel
           zip -r9 "${ZIP_NAME}.zip" . -x ".git" -x "README.md" -x "LICENSE"
           cd -
-      
-          # Move the final ZIP to the workspace
+
           mv /tmp/anykernel/"${ZIP_NAME}.zip" .
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           
-      - name: "📤 Upload artifact"
+      - name: "📤 Upload flashable ZIP"
         uses: actions/upload-artifact@v4
         with:
-          name: ksu-${{ github.run_number }}
-          path: |
-            kernel/${{ env.ZIP_NAME }}.zip
-            kernel/build.log
+          name: ${{ env.ZIP_NAME }}
+          path: kernel/${{ env.ZIP_NAME }}.zip
+
+      - name: "📤 Upload build log"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: kernel/build.log
