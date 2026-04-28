@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "R15-OneUI" ]
     paths:
-      - '.github/workflows/test-kprobes-enhanced.yml'
+      - '.github/workflows/test-kprobes.yml'
   workflow_dispatch:
 
 jobs:
