@@ -108,11 +108,13 @@ jobs:
               else kfree(addr);
           }
           BACKPORTEOF
+          
+          # Append backport, suppress warnings, and set a proper version
           echo "obj-y += compat_backport.o" >> drivers/kernelsu/Kbuild
-          # Cleanup MODULE_IMPORT_NS
-          grep -rIl 'MODULE_IMPORT_NS' drivers/kernelsu/ 2>/dev/null | while read f; do
-            sed -i '/MODULE_IMPORT_NS/d' "$f"
-          done
+          echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
+          echo "ccflags-y += -Wno-incompatible-pointer-types-discards-qualifiers" >> drivers/kernelsu/Kbuild
+          echo 'ccflags-y += -DKSU_VERSION=30000' >> drivers/kernelsu/Kbuild
+          echo 'ccflags-y += -DKSU_VERSION_TAG=\"v3.1.0-legacy\"' >> drivers/kernelsu/Kbuild
 
       - name: Build kernel
         working-directory: ./kernel
