@@ -68,6 +68,27 @@ jobs:
           obj-$(CONFIG_KSU) += kernelsu.o
           KBUILDEOF
           rm -f drivers/kernelsu/Makefile
+          # Backport kvmalloc/kvfree (same as main build)
+          cat > drivers/kernelsu/compat_backport.c << 'BACKPORTEOF'
+          #include <linux/mm.h>
+          #include <linux/vmalloc.h>
+          #include <linux/slab.h>
+          void *kvmalloc(size_t size, gfp_t flags) {
+              void *ret;
+              if (size <= PAGE_SIZE) ret = kmalloc(size, flags | __GFP_NOWARN);
+              else ret = vmalloc(size);
+              if (!ret && (size > PAGE_SIZE || !(flags & __GFP_NOWARN))) ret = vmalloc(size);
+              return ret;
+          }
+          void kvfree(const void *addr) {
+              if (is_vmalloc_addr(addr)) vfree(addr);
+              else kfree(addr);
+          }
+          BACKPORTEOF
+          echo "obj-y += compat_backport.o" >> drivers/kernelsu/Kbuild
+          grep -rIl 'MODULE_IMPORT_NS' drivers/kernelsu/ 2>/dev/null | while read f; do
+            sed -i '/MODULE_IMPORT_NS/d' "$f"
+          done
 
       - name: Build kernel
         working-directory: ./kernel
