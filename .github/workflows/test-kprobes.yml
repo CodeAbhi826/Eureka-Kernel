@@ -1,9 +1,14 @@
-name: Test KSU Next with kprobes
+name: Kprobe Diagnostic Test
 
-on: workflow_dispatch
+on:
+  push:
+    branches: [ "R15-OneUI" ]
+    paths:
+      - '.github/workflows/test-kprobes-enhanced.yml'
+  workflow_dispatch:
 
 jobs:
-  test:
+  diagnose:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout Eureka Kernel source
@@ -26,21 +31,37 @@ jobs:
           cd ..
           echo "$(pwd)/toolchain/bin" >> $GITHUB_PATH
 
-      - name: Enable kprobes in defconfig
+      - name: Enable kprobes and required configs
         working-directory: ./kernel
         run: |
           D="arch/arm64/configs/exynos7885-a20_defconfig"
-          for c in CONFIG_KPROBES=y CONFIG_HAVE_KPROBES=y CONFIG_KPROBE_EVENTS=y CONFIG_KALLSYMS=y CONFIG_KALLSYMS_ALL=y CONFIG_KSU=y CONFIG_KSU_KPROBE_HOOKS=y; do
-            grep -q "$c" "$D" || echo "$c" >> "$D"
+          echo "Enabling kprobe‑related configs..."
+          for c in \
+            CONFIG_KPROBES=y \
+            CONFIG_HAVE_KPROBES=y \
+            CONFIG_KPROBE_EVENTS=y \
+            CONFIG_KALLSYMS=y \
+            CONFIG_KALLSYMS_ALL=y \
+            CONFIG_KSU=y \
+            CONFIG_KSU_KPROBE_HOOKS=y \
+            CONFIG_DYNAMIC_FTRACE=y \
+            CONFIG_FTRACE_SYSCALLS=y \
+            CONFIG_HAVE_SYSCALL_TRACEPOINTS=y; do
+            grep -q "^$c" "$D" || echo "$c" >> "$D"
           done
-          # make sure LTO is off
           sed -i 's/^CONFIG_LTO=y/# CONFIG_LTO is not set/' "$D"
 
-      - name: Integrate KSU Next (kprobe mode)
+      - name: Show kprobe‑related configs after patching
+        working-directory: ./kernel
+        run: |
+          echo "=== Relevant configs ==="
+          grep -E "KPROBE|FTRACE|TRACEPOINT|KALLSYMS|KSU|LTO" arch/arm64/configs/exynos7885-a20_defconfig
+
+      - name: Integrate KSU Next (kprobe mode) + Kbuild + backport
         working-directory: ./kernel
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
-          # In-tree Kbuild replacement (same as your main build)
+          # In-tree Kbuild
           cat > drivers/kernelsu/Kbuild << 'KBUILDEOF'
           kernelsu-objs := ksu.o
           kernelsu-objs += allowlist.o
@@ -68,7 +89,7 @@ jobs:
           obj-$(CONFIG_KSU) += kernelsu.o
           KBUILDEOF
           rm -f drivers/kernelsu/Makefile
-          # Backport kvmalloc/kvfree (same as main build)
+          # Backport kvmalloc/kvfree
           cat > drivers/kernelsu/compat_backport.c << 'BACKPORTEOF'
           #include <linux/mm.h>
           #include <linux/vmalloc.h>
@@ -86,6 +107,7 @@ jobs:
           }
           BACKPORTEOF
           echo "obj-y += compat_backport.o" >> drivers/kernelsu/Kbuild
+          # Cleanup MODULE_IMPORT_NS
           grep -rIl 'MODULE_IMPORT_NS' drivers/kernelsu/ 2>/dev/null | while read f; do
             sed -i '/MODULE_IMPORT_NS/d' "$f"
           done
@@ -94,15 +116,92 @@ jobs:
         working-directory: ./kernel
         run: |
           export PATH="$(pwd)/../toolchain/bin:$PATH"
-          make O=out ARCH=arm64 exynos7885-a20_defconfig
-          make -j$(nproc) O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build.log
+          make O=out ARCH=arm64 exynos7885-a20_defconfig 2>&1 | tail -5
+          make -j$(nproc) O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
+            CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build.log
 
-      - name: Result
+      - name: Run diagnostics
         working-directory: ./kernel
         run: |
-          if strings out/arch/arm64/boot/Image 2>/dev/null | grep -q "KernelSU"; then
-            echo "✅ KSU Next works with kprobes!"
-            echo "You can simplify your main build significantly."
+          echo ""
+          echo "╔══════════════════════════════════════╗"
+          echo "║   KPROBE DIAGNOSTIC REPORT           ║"
+          echo "╚══════════════════════════════════════╝"
+          echo ""
+
+          # 1) Required kernel configs
+          echo "─── 1. Required kernel configs ───"
+          for cfg in \
+            CONFIG_KPROBES=y \
+            CONFIG_HAVE_KPROBES=y \
+            CONFIG_KPROBE_EVENTS=y \
+            CONFIG_KALLSYMS=y \
+            CONFIG_KALLSYMS_ALL=y \
+            CONFIG_KSU=y \
+            CONFIG_KSU_KPROBE_HOOKS=y \
+            CONFIG_HAVE_SYSCALL_TRACEPOINTS=y \
+            CONFIG_DYNAMIC_FTRACE=y \
+            CONFIG_FTRACE_SYSCALLS=y; do
+            if grep -q "^$cfg" out/.config; then
+              echo "  ✅ $cfg"
+            else
+              echo "  ❌ $cfg MISSING"
+            fi
+          done
+
+          # 2) KSU driver objects
+          echo ""
+          echo "─── 2. KSU driver objects ───"
+          if ls out/drivers/kernelsu/ksu.o &>/dev/null || ls out/drivers/kernelsu/built-in.o &>/dev/null; then
+            echo "  ✅ Driver compiled"
           else
-            echo "❌ KSU Next with kprobes failed – manual hooks are required."
+            echo "  ❌ Driver objects NOT FOUND"
+          fi
+
+          # 3) KernelSU string in Image
+          echo ""
+          echo "─── 3. KernelSU in Image ───"
+          if [ -f out/arch/arm64/boot/Image ] && strings out/arch/arm64/boot/Image | grep -q "KernelSU"; then
+            echo "  ✅ KernelSU string present – kprobes likely WORKING"
+          else
+            echo "  ❌ KernelSU string MISSING – kprobes compatibility FAILED"
+          fi
+
+          # 4) KSU symbols in vmlinux (if available)
+          echo ""
+          echo "─── 4. KSU symbols in vmlinux ───"
+          if [ -f out/vmlinux ]; then
+            echo "KSU-related symbols:"
+            aarch64-linux-gnu-nm out/vmlinux 2>/dev/null | grep -i "ksu_" | head -20
+          else
+            echo "  vmlinux not found"
+          fi
+
+          # 5) kprobe-specific symbols
+          echo ""
+          echo "─── 5. Kprobe-specific symbols ───"
+          if [ -f out/vmlinux ]; then
+            echo "Looking for kprobe infrastructure..."
+            aarch64-linux-gnu-nm out/vmlinux 2>/dev/null | grep -E "register_kprobe|ksu_kprobe" | head -10
+          fi
+
+          # 6) FTRACE / SYSCALL_TRACEPOINT check
+          echo ""
+          echo "─── 6. FTRACE/SYSCALL_TRACEPOINT symbols ───"
+          if [ -f out/vmlinux ]; then
+            aarch64-linux-gnu-nm out/vmlinux 2>/dev/null | grep -i "tracepoint" | head -5
+          fi
+
+          echo ""
+          echo "══════════════════════════════════════"
+          echo " VERDICT"
+          echo "══════════════════════════════════════"
+          if [ -f out/arch/arm64/boot/Image ] && strings out/arch/arm64/boot/Image | grep -q "KernelSU"; then
+            echo "✅ KSU Next with kprobes – SUCCESS"
+            echo "   You can switch to kprobe mode for simpler updates."
+          else
+            echo "❌ KSU Next with kprobes – FAILED"
+            echo "   Reason: kprobes are broken / missing syscall tracepoints."
+            echo "   Stick with manual hooks – they are already working."
           fi
