@@ -126,23 +126,17 @@ jobs:
             /tmp/ksu-setup.sh legacy || echo "setup.sh returned non-zero, continuing..."
           fi
 
-          # In‑tree Kbuild
-          cat > drivers/kernelsu/Kbuild << 'KBUILDEOF'
-          # Use the driver's own Kbuild, just add our backport and suppress strict-prototypes
-          if [ -f drivers/kernelsu/Kbuild ]; then
-            # Add backport object if not already there
-            if ! grep -q 'compat_backport.o' drivers/kernelsu/Kbuild; then
-              echo "obj-y += compat_backport.o" >> drivers/kernelsu/Kbuild
-            fi
-            # Suppress strict-prototypes warnings
-            echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
-            echo "Kbuild updated"
-          else
-            echo "❌ drivers/kernelsu/Kbuild missing – cannot proceed"
-            exit 1
-          fi
+          # Download the official Kbuild from the release tag (contains SELinux include paths)
+          curl -L "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${V}/kernel/Kbuild" -o drivers/kernelsu/Kbuild
+
+          # Append our backport and suppress strict-prototypes warnings
+          echo "obj-y += compat_backport.o" >> drivers/kernelsu/Kbuild
+          echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
+
           # Remove the external‑module Makefile so in‑tree build works
           rm -f drivers/kernelsu/Makefile
+
+          echo "Official Kbuild installed + backport added"
 
           # Backport kvmalloc/kvfree
           cat > drivers/kernelsu/compat_backport.c << 'BACKPORTEOF'
