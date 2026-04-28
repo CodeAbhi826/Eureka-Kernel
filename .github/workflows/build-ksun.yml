@@ -154,6 +154,7 @@ jobs:
           obj-$(CONFIG_KSU) += kernelsu.o
           KBUILDEOF
           rm -f drivers/kernelsu/Makefile
+          echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
 
           # Backport kvmalloc/kvfree
           cat > drivers/kernelsu/compat_backport.c << 'BACKPORTEOF'
