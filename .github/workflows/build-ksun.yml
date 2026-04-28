@@ -351,78 +351,78 @@ jobs:
           cp out/arch/arm64/boot/Image .
           echo "ALL OK"
 
-- name: "📦 Create flashable AnyKernel3 ZIP"
-  working-directory: ./kernel
-  run: |
-    # Build the default version string (from input or fallback)
-    VERSION="${{ github.event.inputs.ksu_version }}"
-    VERSION="${VERSION:-v3.1.0-legacy}"
-    BUILD_NO=$(printf "%03d" ${{ github.run_number }})
-    ZIP_NAME="ksu-next-${VERSION}-a20-${BUILD_NO}"
-
-    # Clone official AnyKernel3 template
-    git clone --depth=1 https://github.com/osm0sis/AnyKernel3 /tmp/anykernel
-
-    # Copy the kernel image into the template
-    cp out/arch/arm64/boot/Image /tmp/anykernel/
-
-    # Update anykernel.sh with device properties
-    cat > /tmp/anykernel/anykernel.sh << 'AKEOF'
-    # AnyKernel3 script for Galaxy A20 (Exynos 7885 / r0s)
-    # device.name1=a20
-    # device.name2=a20e
-    # device.name3=a20s
-    # device.name4=r0s
-    # block=/dev/block/platform/13500000.dwmmc0/by-name/BOOT
-    # is_slot_device=0
-
-    ## AnyKernel setup
-    # begin properties
-    kernel.string=KSU-Next Legacy
-    do.devicecheck=1
-    do.modules=0
-    do.systemless=1
-    do.cleanup=1
-    do.cleanuponabort=0
-    device.name1=a20
-    device.name2=a20e
-    device.name3=a20s
-    device.name4=r0s
-    supported.versions=9 - 14
-    supported.patchlevels=2019-07 - 2025-01
-    # end properties
-
-    # shell variables
-    block=/dev/block/platform/13500000.dwmmc0/by-name/BOOT;
-    is_slot_device=0;
-    ramdisk_compression=auto;
-
-    ## AnyKernel methods (DO NOT CHANGE)
-    # import the ak3-core.sh script
-    . /tmp/anykernel/tools/ak3-core.sh;
-
-    ## AnyKernel install
-    split_boot;
-
-    flash_boot;
-    flash_dtbo;
-
-    ## end install
-    AKEOF
-
-    # Create the ZIP
-    cd /tmp/anykernel
-    zip -r9 "${ZIP_NAME}.zip" . -x ".git" -x "README.md" -x "LICENSE"
-    cd -
-
-    # Move the final ZIP to the workspace
-    mv /tmp/anykernel/"${ZIP_NAME}.zip" .
-    echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-    
-- name: "📤 Upload artifact"
-  uses: actions/upload-artifact@v4
-  with:
-    name: ksu-${{ github.run_number }}
-    path: |
-      kernel/${{ env.ZIP_NAME }}.zip
-      kernel/build.log
+      - name: "📦 Create flashable AnyKernel3 ZIP"
+        working-directory: ./kernel
+        run: |
+          # Build the default version string (from input or fallback)
+          VERSION="${{ github.event.inputs.ksu_version }}"
+          VERSION="${VERSION:-v3.1.0-legacy}"
+          BUILD_NO=$(printf "%03d" ${{ github.run_number }})
+          ZIP_NAME="ksu-next-${VERSION}-a20-${BUILD_NO}"
+      
+          # Clone official AnyKernel3 template
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 /tmp/anykernel
+      
+          # Copy the kernel image into the template
+          cp out/arch/arm64/boot/Image /tmp/anykernel/
+      
+          # Update anykernel.sh with device properties
+          cat > /tmp/anykernel/anykernel.sh << 'AKEOF'
+          # AnyKernel3 script for Galaxy A20 (Exynos 7885 / r0s)
+          # device.name1=a20
+          # device.name2=a20e
+          # device.name3=a20s
+          # device.name4=r0s
+          # block=/dev/block/platform/13500000.dwmmc0/by-name/BOOT
+          # is_slot_device=0
+      
+          ## AnyKernel setup
+          # begin properties
+          kernel.string=KSU-Next Legacy
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=a20
+          device.name2=a20e
+          device.name3=a20s
+          device.name4=r0s
+          supported.versions=9 - 14
+          supported.patchlevels=2019-07 - 2025-01
+          # end properties
+      
+          # shell variables
+          block=/dev/block/platform/13500000.dwmmc0/by-name/BOOT;
+          is_slot_device=0;
+          ramdisk_compression=auto;
+      
+          ## AnyKernel methods (DO NOT CHANGE)
+          # import the ak3-core.sh script
+          . /tmp/anykernel/tools/ak3-core.sh;
+      
+          ## AnyKernel install
+          split_boot;
+      
+          flash_boot;
+          flash_dtbo;
+      
+          ## end install
+          AKEOF
+      
+          # Create the ZIP
+          cd /tmp/anykernel
+          zip -r9 "${ZIP_NAME}.zip" . -x ".git" -x "README.md" -x "LICENSE"
+          cd -
+      
+          # Move the final ZIP to the workspace
+          mv /tmp/anykernel/"${ZIP_NAME}.zip" .
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          
+      - name: "📤 Upload artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ksu-${{ github.run_number }}
+          path: |
+            kernel/${{ env.ZIP_NAME }}.zip
+            kernel/build.log
