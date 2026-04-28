@@ -125,13 +125,16 @@ jobs:
             chmod +x /tmp/ksu-setup.sh
             /tmp/ksu-setup.sh legacy || echo "setup.sh returned non-zero, continuing..."
           fi
+          # Ensure the KernelSU‑Next git repo has full history and tags so Kbuild can auto‑detect version
+          echo "Fetching full git history and tags…"
+          cd KernelSU-Next
+          git fetch --unshallow 2>/dev/null || true
+          git fetch --tags 2>/dev/null || true
+          cd ..
 
           # Download the official Kbuild from the release tag (contains SELinux include paths)
           curl -L "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${V}/kernel/Kbuild" -o drivers/kernelsu/Kbuild
-          # Force the correct version and version tag in the driver's header
-          sed -i 's/#define KSU_VERSION.*/#define KSU_VERSION 33110/' drivers/kernelsu/ksu.h 2>/dev/null || echo '#define KSU_VERSION 33110' >> drivers/kernelsu/ksu.h
-          sed -i 's/#define KSU_VERSION_TAG.*/#define KSU_VERSION_TAG "v3.1.0-legacy"/' drivers/kernelsu/ksu.h 2>/dev/null || echo '#define KSU_VERSION_TAG "v3.1.0-legacy"' >> drivers/kernelsu/ksu.h
-
+  
           # Append only the necessary warning suppressions
           echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
           echo "ccflags-y += -Wno-incompatible-pointer-types-discards-qualifiers" >> drivers/kernelsu/Kbuild
