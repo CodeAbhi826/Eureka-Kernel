@@ -129,9 +129,12 @@ jobs:
           # Download the official Kbuild from the release tag (contains SELinux include paths)
           curl -L "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${V}/kernel/Kbuild" -o drivers/kernelsu/Kbuild
 
-          # Append our backport and suppress strict-prototypes warnings
+          # Append backport, suppress warnings, and set a proper version
           echo "obj-y += compat_backport.o" >> drivers/kernelsu/Kbuild
           echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
+          echo "ccflags-y += -Wno-incompatible-pointer-types-discards-qualifiers" >> drivers/kernelsu/Kbuild
+          echo 'ccflags-y += -DKSU_VERSION=30000' >> drivers/kernelsu/Kbuild
+          echo 'ccflags-y += -DKSU_VERSION_TAG="v3.1.0-legacy"' >> drivers/kernelsu/Kbuild
 
           # Remove the external‑module Makefile so in‑tree build works
           rm -f drivers/kernelsu/Makefile
