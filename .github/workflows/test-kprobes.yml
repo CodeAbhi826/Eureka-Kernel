@@ -1,0 +1,87 @@
+name: Test KSU Next with kprobes
+
+on: workflow_dispatch
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Eureka Kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: eurekadevelopment/Eureka-Kernel
+          ref: R15-OneUI
+          path: kernel
+
+      - name: Install dependencies
+        run: |
+          sudo apt update -qq
+          sudo apt install -y bc bison flex libssl-dev make git python3 cpio gcc-aarch64-linux-gnu
+
+      - name: Neutron Clang
+        run: |
+          mkdir -p toolchain && cd toolchain
+          bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") -S=10032024
+          bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
+          cd ..
+          echo "$(pwd)/toolchain/bin" >> $GITHUB_PATH
+
+      - name: Enable kprobes in defconfig
+        working-directory: ./kernel
+        run: |
+          D="arch/arm64/configs/exynos7885-a20_defconfig"
+          for c in CONFIG_KPROBES=y CONFIG_HAVE_KPROBES=y CONFIG_KPROBE_EVENTS=y CONFIG_KALLSYMS=y CONFIG_KALLSYMS_ALL=y CONFIG_KSU=y CONFIG_KSU_KPROBE_HOOKS=y; do
+            grep -q "$c" "$D" || echo "$c" >> "$D"
+          done
+          # make sure LTO is off
+          sed -i 's/^CONFIG_LTO=y/# CONFIG_LTO is not set/' "$D"
+
+      - name: Integrate KSU Next (kprobe mode)
+        working-directory: ./kernel
+        run: |
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+          # In-tree Kbuild replacement (same as your main build)
+          cat > drivers/kernelsu/Kbuild << 'KBUILDEOF'
+          kernelsu-objs := ksu.o
+          kernelsu-objs += allowlist.o
+          kernelsu-objs += app_profile.o
+          kernelsu-objs += apk_sign.o
+          kernelsu-objs += sucompat.o
+          kernelsu-objs += syscall_hook_manager.o
+          kernelsu-objs += throne_tracker.o
+          kernelsu-objs += pkg_observer.o
+          kernelsu-objs += setuid_hook.o
+          kernelsu-objs += lsm_hooks.o
+          kernelsu-objs += kernel_compat.o
+          kernelsu-objs += kernel_umount.o
+          kernelsu-objs += supercalls.o
+          kernelsu-objs += su_mount_ns.o
+          kernelsu-objs += feature.o
+          kernelsu-objs += ksud.o
+          kernelsu-objs += seccomp_cache.o
+          kernelsu-objs += file_wrapper.o
+          kernelsu-objs += util.o
+          kernelsu-objs += extras.o
+          kernelsu-objs += selinux/selinux.o
+          kernelsu-objs += selinux/sepolicy.o
+          kernelsu-objs += selinux/rules.o
+          obj-$(CONFIG_KSU) += kernelsu.o
+          KBUILDEOF
+          rm -f drivers/kernelsu/Makefile
+
+      - name: Build kernel
+        working-directory: ./kernel
+        run: |
+          export PATH="$(pwd)/../toolchain/bin:$PATH"
+          make O=out ARCH=arm64 exynos7885-a20_defconfig
+          make -j$(nproc) O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build.log
+
+      - name: Result
+        working-directory: ./kernel
+        run: |
+          if strings out/arch/arm64/boot/Image 2>/dev/null | grep -q "KernelSU"; then
+            echo "✅ KSU Next works with kprobes!"
+            echo "You can simplify your main build significantly."
+          else
+            echo "❌ KSU Next with kprobes failed – manual hooks are required."
+          fi
