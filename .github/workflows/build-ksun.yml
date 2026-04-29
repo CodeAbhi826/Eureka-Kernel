@@ -104,6 +104,9 @@ jobs:
           grep -q "CONFIG_SECURITY_DMESG_RESTRICT" "$D" && sed -i 's/^CONFIG_SECURITY_DMESG_RESTRICT=y/# CONFIG_SECURITY_DMESG_RESTRICT is not set/' "$D" || echo "# CONFIG_SECURITY_DMESG_RESTRICT is not set" >> "$D"
           # Enable KSU internal debug prints
           grep -q "CONFIG_KSU_DEBUG=y" "$D" || echo "CONFIG_KSU_DEBUG=y" >> "$D"
+          
+          # Enable OverlayFS for KSU Meta module
+          grep -q "CONFIG_OVERLAY_FS=y" "$D" || echo "CONFIG_OVERLAY_FS=y" >> "$D"
                     
       - name: "[5/8] Integrate KSU Next (official git clone + hooks)"
         working-directory: ./kernel
@@ -338,6 +341,7 @@ jobs:
       - name: "Final verify"
         working-directory: ./kernel
         run: |
+          grep -q "^CONFIG_OVERLAY_FS=y" "$DEFCONFIG" && echo "✅ CONFIG_OVERLAY_FS=y" || { echo "❌ CONFIG_OVERLAY_FS=y MISSING"; exit 1; }
           grep -q "^CONFIG_KSU=y" out/.config || { echo "FAIL1"; exit 1; }
           [ -f out/drivers/kernelsu/ksu.o ] || [ -f out/drivers/kernelsu/built-in.o ] || { echo "FAIL2"; exit 1; }
           [ -f out/arch/arm64/boot/Image ] || { echo "FAIL3"; exit 1; }
