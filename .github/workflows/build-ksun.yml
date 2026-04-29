@@ -107,6 +107,13 @@ jobs:
           
           # Enable OverlayFS for KSU Meta module
           grep -q "CONFIG_OVERLAY_FS=y" "$D" || echo "CONFIG_OVERLAY_FS=y" >> "$D"
+
+      - name: "🔍 Show current battery/performance features"
+        working-directory: ./kernel
+        run: |
+          D="arch/arm64/configs/exynos7885-a20_defconfig"
+          echo "=== Battery / Performance features currently enabled ==="
+          grep -E "CONFIG_TCP_CONG|CONFIG_WAKELOCK|CONFIG_IOSCHED|CONFIG_DEFAULT_IOSCHED|CONFIG_BOEFFLA|CONFIG_ARCH_POWER|CONFIG_CRC|CONFIG_FSYNC|CONFIG_STATE_NOTIFIER|CONFIG_POWERSUSPEND" "$D" || echo "(none found)"    
                     
       - name: "[5/8] Integrate KSU Next v3.1.0-legacy (no setup.sh, no backport)"
         working-directory: ./kernel
