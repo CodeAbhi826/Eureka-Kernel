@@ -3,7 +3,8 @@ name: Build Eureka R15-OneUI + SukiSU Ultra (verified)
 on:
   push:
     branches: [ "R15-OneUI" ]          # change to your branch name
-    # paths:                      # optional – uncomment to limit triggers
+    paths:
+      - '.github/workflows/build-sukisu.yml'               # optional – uncomment to limit triggers
     #   - 'workflows/**'
     #   - 'kernel_patches/**'
   workflow_dispatch:
