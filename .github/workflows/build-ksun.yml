@@ -105,52 +105,51 @@ jobs:
           # Enable KSU internal debug prints
           grep -q "CONFIG_KSU_DEBUG=y" "$D" || echo "CONFIG_KSU_DEBUG=y" >> "$D"
                     
-      - name: "[5/8] Clean old hooks + integrate KSU Next (official manual method)"
+      - name: "[5/8] Integrate KSU Next (official git clone + hooks)"
         working-directory: ./kernel
         run: |
-          V="${{ github.event.inputs.ksu_version }}"
-          V="${V:-v3.1.0-legacy}"
-          echo "Using KSU version: $V"
+          # Remove any previous integration
           rm -rf drivers/kernelsu KernelSU-Next
 
-          # Download driver
-          curl -L "https://github.com/KernelSU-Next/KernelSU-Next/archive/refs/tags/${V}.tar.gz" -o /tmp/ksu.tar.gz
-          mkdir -p /tmp/ksu-src
-          tar xzf /tmp/ksu.tar.gz -C /tmp/ksu-src --strip-components=1
-          cp -r /tmp/ksu-src/kernel drivers/kernelsu
+          # Official integration – clones the KernelSU‑Next repo, creates symlink
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
 
-          # Run official setup.sh (patches drivers/Makefile, Kconfig, selinux backports, etc.)
-          if [ -f /tmp/ksu-src/kernel/setup.sh ]; then
-            cp /tmp/ksu-src/kernel/setup.sh /tmp/ksu-setup.sh
-            chmod +x /tmp/ksu-setup.sh
-            /tmp/ksu-setup.sh legacy || echo "setup.sh returned non-zero, continuing..."
-          fi
-          # Ensure the KernelSU‑Next git repo has full history and tags so Kbuild can auto‑detect version
-          echo "Fetching full git history and tags…"
+          # Ensure full git history and tags so Kbuild can detect the version
+          echo "Fetching git tags..."
           cd KernelSU-Next
           git fetch --unshallow 2>/dev/null || true
           git fetch --tags 2>/dev/null || true
           cd ..
 
-          # Download the official Kbuild from the release tag (contains SELinux include paths)
-          curl -L "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${V}/kernel/Kbuild" -o drivers/kernelsu/Kbuild
-  
-          # Append only the necessary warning suppressions
+          # The symlink drivers/kernelsu now points to KernelSU-Next/kernel
+          # Add our backport object and warning flags to the Kbuild (do NOT overwrite)
+          cat > drivers/kernelsu/compat_backport.c << 'BACKPORTEOF'
+          #include <linux/mm.h>
+          #include <linux/vmalloc.h>
+          #include <linux/slab.h>
+          void *kvmalloc(size_t size, gfp_t flags) {
+              void *ret;
+              if (size <= PAGE_SIZE) ret = kmalloc(size, flags | __GFP_NOWARN);
+              else ret = vmalloc(size);
+              if (!ret && (size > PAGE_SIZE || !(flags & __GFP_NOWARN))) ret = vmalloc(size);
+              return ret;
+          }
+          void kvfree(const void *addr) {
+              if (is_vmalloc_addr(addr)) vfree(addr);
+              else kfree(addr);
+          }
+          BACKPORTEOF
+          echo "obj-y += compat_backport.o" >> drivers/kernelsu/Kbuild
           echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
           echo "ccflags-y += -Wno-incompatible-pointer-types-discards-qualifiers" >> drivers/kernelsu/Kbuild
 
-          # Remove the external‑module Makefile so in‑tree build works
-          rm -f drivers/kernelsu/Makefile
-
-          echo "Official Kbuild installed and warnings suppressed"
-
-          # Cleanup MODULE_IMPORT_NS and stub header
+          # Remove MODULE_IMPORT_NS and stub headers
           grep -rIl 'MODULE_IMPORT_NS' drivers/kernelsu/ 2>/dev/null | while read f; do
             sed -i '/MODULE_IMPORT_NS/d' "$f"
           done
           [ -f include/linux/compiler_types.h ] || echo '#include <linux/compiler.h>' > include/linux/compiler_types.h
 
-          # ── Create hook header (real prototypes from the driver) ──
+          # Create hook header (real prototypes)
           cat > include/linux/kernelsu_hook.h << 'HEADEREOF'
           #ifndef _LINUX_KERNELSU_HOOK_H
           #define _LINUX_KERNELSU_HOOK_H
@@ -158,7 +157,6 @@ jobs:
           #include <linux/sched.h>
           #include <linux/stat.h>
           #include <linux/fcntl.h>
-          /* Real prototypes exactly as the driver defines them */
           int ksu_handle_execveat(int *fd, struct filename **filename_ptr,
                                   void *argv, void *envp, int *flags);
           int ksu_handle_faccessat(int *dfd, const char __user **filename_user,
@@ -172,24 +170,18 @@ jobs:
           #endif
           HEADEREOF
 
-          # ── Remove all old hooks and apply official ones (Python) ──
+          # Remove all old hooks and apply official ones (Python)
           python3 << 'PYEOF'
           import re, os
 
-          # --- Helper: remove previous #ifdef CONFIG_KSU ... #endif blocks
           def remove_ksu_blocks(text):
-              # Remove blocks that start with #ifdef CONFIG_KSU and end with #endif
-              # This regex is non-greedy and handles nesting minimally (good enough)
               return re.sub(r'#ifdef\s+CONFIG_KSU\b.*?#endif\s*\n?', '', text, flags=re.DOTALL)
 
-          # --- Helper: ensure header is at top of file
           def ensure_header(text):
               if '#include <linux/kernelsu_hook.h>' not in text:
                   text = '#include <linux/kernelsu_hook.h>\n' + text
               return text
 
-          # --- Hook definitions (file, pattern, replacement)
-          # We insert the hook code at the right location.
           hooks = [
               (
                   'fs/exec.c',
@@ -235,17 +227,13 @@ jobs:
                   continue
               with open(filepath, 'r') as f:
                   text = f.read()
-              # Remove old KSU blocks first to avoid duplication
               text = remove_ksu_blocks(text)
-              # Insert the new hook code before the matched pattern
               match = re.search(pattern, text)
               if not match:
                   print(f'Pattern not found in {filepath}: {pattern[:60]}...')
                   continue
-              # Insert before the match
               start = match.start()
               text = text[:start] + new_code + text[start:]
-              # Ensure the header is at the very top
               text = ensure_header(text)
               with open(filepath, 'w') as f:
                   f.write(text)
@@ -270,7 +258,7 @@ jobs:
             fi
           done
 
-          echo "✅ Official KSU Next hooks applied"
+          echo "✅ KSU Next integrated (git version auto‑detected)"
           
       - name: "🔍 Check driver build integration"
         working-directory: ./kernel
@@ -451,6 +439,15 @@ jobs:
 
           mv /tmp/anykernel/"${ZIP_NAME}.zip" .
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+
+      - name: "📤 Send kernel to Telegram"
+        run: |
+          ZIP_PATH="kernel/${{ env.ZIP_NAME }}.zip"
+          echo "Sending $ZIP_PATH to Telegram..."
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument" \
+            -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -F document="@${ZIP_PATH}" \
+            -F caption="KSU Next build: ${{ env.ZIP_NAME }}"    
           
       - name: "📤 Upload flashable ZIP"
         uses: actions/upload-artifact@v4
