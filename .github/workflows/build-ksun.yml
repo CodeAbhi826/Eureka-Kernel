@@ -127,8 +127,11 @@ jobs:
           echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
           echo "ccflags-y += -Wno-incompatible-pointer-types-discards-qualifiers" >> drivers/kernelsu/Kbuild
           # Force the correct version and tag (git auto-detect won't work)
-          sed -i 's/^#define KSU_VERSION .*/#define KSU_VERSION 33110/' drivers/kernelsu/ksu.h
-          sed -i 's/^#define KSU_VERSION_TAG .*/#define KSU_VERSION_TAG "v3.1.0-legacy"/' drivers/kernelsu/ksu.h
+          
+          # Force version directly in the Kbuild (bypass git detection)
+          sed -i 's/^KSU_VERSION_FALLBACK := 1/KSU_VERSION_FALLBACK := 33110/' drivers/kernelsu/Kbuild
+          sed -i 's/^KSU_VERSION_TAG_FALLBACK := v0.0.1/KSU_VERSION_TAG_FALLBACK := v3.1.0-legacy/' drivers/kernelsu/Kbuild
+          
           # Add the driver to the kernel build (if not already done by the tarball's setup)
           grep -q 'CONFIG_KSU' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           grep -q 'CONFIG_KSU' drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
@@ -291,7 +294,7 @@ jobs:
       - name: "Final verify"
         working-directory: ./kernel
         run: |
-          grep -q "^CONFIG_OVERLAY_FS=y" arch/arm64/configs/exynos7885-a20_defconfig && echo "✅ CONFIG_OVERLAY_FS=y" || { echo "❌ CONFIG_OVERLAY_FS=y MISSING"; exit 1; }
+          grep -q "^CONFIG_OVERLAY_FS=y" out/.config && echo "✅ CONFIG_OVERLAY_FS=y" || { echo "❌ CONFIG_OVERLAY_FS=y MISSING"; exit 1; }
           grep -q "^CONFIG_KSU=y" out/.config || { echo "FAIL1"; exit 1; }
           [ -f out/drivers/kernelsu/ksu.o ] || [ -f out/drivers/kernelsu/built-in.o ] || { echo "FAIL2"; exit 1; }
           [ -f out/arch/arm64/boot/Image ] || { echo "FAIL3"; exit 1; }
