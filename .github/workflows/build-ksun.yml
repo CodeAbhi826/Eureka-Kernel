@@ -108,51 +108,40 @@ jobs:
           # Enable OverlayFS for KSU Meta module
           grep -q "CONFIG_OVERLAY_FS=y" "$D" || echo "CONFIG_OVERLAY_FS=y" >> "$D"
                     
-      - name: "[5/8] Integrate KSU Next (official git clone + hooks)"
+      - name: "[5/8] Integrate KSU Next v3.1.0-legacy (no setup.sh, no backport)"
         working-directory: ./kernel
         run: |
-          # Remove any previous integration
+          V="v3.1.0-legacy"
+          echo "Using KSU version: $V"
           rm -rf drivers/kernelsu KernelSU-Next
 
-          # Official integration – clones the KernelSU‑Next repo, creates symlink
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+          # Download the exact release tarball
+          curl -L "https://github.com/KernelSU-Next/KernelSU-Next/archive/refs/tags/${V}.tar.gz" -o /tmp/ksu.tar.gz
+          mkdir -p /tmp/ksu-src
+          tar xzf /tmp/ksu.tar.gz -C /tmp/ksu-src --strip-components=1
 
-          # Ensure full git history and tags so Kbuild can detect the version
-          echo "Fetching git tags..."
-          cd KernelSU-Next
-          git fetch --unshallow 2>/dev/null || true
-          git fetch --tags 2>/dev/null || true
-          cd ..
+          # Copy the kernel driver
+          cp -r /tmp/ksu-src/kernel drivers/kernelsu
 
-          # The symlink drivers/kernelsu now points to KernelSU-Next/kernel
-          # Add our backport object and warning flags to the Kbuild (do NOT overwrite)
-          cat > drivers/kernelsu/compat_backport.c << 'BACKPORTEOF'
-          #include <linux/mm.h>
-          #include <linux/vmalloc.h>
-          #include <linux/slab.h>
-          void *kvmalloc(size_t size, gfp_t flags) {
-              void *ret;
-              if (size <= PAGE_SIZE) ret = kmalloc(size, flags | __GFP_NOWARN);
-              else ret = vmalloc(size);
-              if (!ret && (size > PAGE_SIZE || !(flags & __GFP_NOWARN))) ret = vmalloc(size);
-              return ret;
-          }
-          void kvfree(const void *addr) {
-              if (is_vmalloc_addr(addr)) vfree(addr);
-              else kfree(addr);
-          }
-          BACKPORTEOF
-          echo "obj-y += compat_backport.o" >> drivers/kernelsu/Kbuild
+          # Keep the original Kbuild, add warning flags and version define
           echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
           echo "ccflags-y += -Wno-incompatible-pointer-types-discards-qualifiers" >> drivers/kernelsu/Kbuild
+          # Force the correct version and tag (git auto-detect won't work)
+          sed -i 's/^#define KSU_VERSION .*/#define KSU_VERSION 33110/' drivers/kernelsu/ksu.h
+          sed -i 's/^#define KSU_VERSION_TAG .*/#define KSU_VERSION_TAG "v3.1.0-legacy"/' drivers/kernelsu/ksu.h
+          # Add the driver to the kernel build (if not already done by the tarball's setup)
+          grep -q 'CONFIG_KSU' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+          grep -q 'CONFIG_KSU' drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
 
-          # Remove MODULE_IMPORT_NS and stub headers
+          # The driver already has kvmalloc – no compat_backport.o needed
+
+          # Remove MODULE_IMPORT_NS
           grep -rIl 'MODULE_IMPORT_NS' drivers/kernelsu/ 2>/dev/null | while read f; do
             sed -i '/MODULE_IMPORT_NS/d' "$f"
           done
           [ -f include/linux/compiler_types.h ] || echo '#include <linux/compiler.h>' > include/linux/compiler_types.h
 
-          # Create hook header (real prototypes)
+          # Hook header and injection (same as before)
           cat > include/linux/kernelsu_hook.h << 'HEADEREOF'
           #ifndef _LINUX_KERNELSU_HOOK_H
           #define _LINUX_KERNELSU_HOOK_H
@@ -173,75 +162,37 @@ jobs:
           #endif
           HEADEREOF
 
-          # Remove all old hooks and apply official ones (Python)
           python3 << 'PYEOF'
           import re, os
-
           def remove_ksu_blocks(text):
               return re.sub(r'#ifdef\s+CONFIG_KSU\b.*?#endif\s*\n?', '', text, flags=re.DOTALL)
-
           def ensure_header(text):
               if '#include <linux/kernelsu_hook.h>' not in text:
                   text = '#include <linux/kernelsu_hook.h>\n' + text
               return text
-
           hooks = [
-              (
-                  'fs/exec.c',
-                  r'return do_execveat_common\(AT_FDCWD, filename, argv, envp, 0\);',
-                  '#ifdef CONFIG_KSU\n'
-                  '\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n'
-                  '#endif\n'
-              ),
-              (
-                  'fs/open.c',
-                  r'if \(mode & ~S_IRWXO\)\s+/\* where\'s F_OK, X_OK, W_OK, R_OK\? \*/',
-                  '#ifdef CONFIG_KSU\n'
-                  '\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n'
-                  '#endif\n'
-              ),
-              (
-                  'fs/read_write.c',
-                  r'ssize_t ret = -EBADF;',
-                  '#ifdef CONFIG_KSU\n'
-                  '\tif (unlikely(ksu_vfs_read_hook))\n'
-                  '\t\tksu_handle_sys_read(fd, &buf, &count);\n'
-                  '#endif\n'
-              ),
-              (
-                  'fs/stat.c',
-                  r'error = vfs_fstatat\(dfd, filename, &stat, flag\);',
-                  '#ifdef CONFIG_KSU\n'
-                  '\tksu_handle_stat(&dfd, &filename, &flag);\n'
-                  '#endif\n'
-              ),
-              (
-                  'kernel/reboot.c',
-                  r'if \(!ns_capable\(pid_ns->user_ns, CAP_SYS_BOOT\)\)',
-                  '#ifdef CONFIG_KSU\n'
-                  '\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n'
-                  '#endif\n'
-              ),
+              ('fs/exec.c', r'return do_execveat_common\(AT_FDCWD, filename, argv, envp, 0\);',
+               '#ifdef CONFIG_KSU\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif\n'),
+              ('fs/open.c', r'if \(mode & ~S_IRWXO\)\s+/\* where\'s F_OK, X_OK, W_OK, R_OK\? \*/',
+               '#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n'),
+              ('fs/read_write.c', r'ssize_t ret = -EBADF;',
+               '#ifdef CONFIG_KSU\n\tif (unlikely(ksu_vfs_read_hook))\n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif\n'),
+              ('fs/stat.c', r'error = vfs_fstatat\(dfd, filename, &stat, flag\);',
+               '#ifdef CONFIG_KSU\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif\n'),
+              ('kernel/reboot.c', r'if \(!ns_capable\(pid_ns->user_ns, CAP_SYS_BOOT\)\)',
+               '#ifdef CONFIG_KSU\n\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif\n'),
           ]
-
           for filepath, pattern, new_code in hooks:
-              if not os.path.exists(filepath):
-                  print(f'{filepath} not found, skipping')
-                  continue
-              with open(filepath, 'r') as f:
-                  text = f.read()
+              if not os.path.exists(filepath): continue
+              with open(filepath, 'r') as f: text = f.read()
               text = remove_ksu_blocks(text)
               match = re.search(pattern, text)
-              if not match:
-                  print(f'Pattern not found in {filepath}: {pattern[:60]}...')
-                  continue
-              start = match.start()
-              text = text[:start] + new_code + text[start:]
+              if match:
+                  start = match.start()
+                  text = text[:start] + new_code + text[start:]
               text = ensure_header(text)
-              with open(filepath, 'w') as f:
-                  f.write(text)
+              with open(filepath, 'w') as f: f.write(text)
               print(f'Patched {filepath}')
-
           PYEOF
 
           # Verify hooks
@@ -260,8 +211,7 @@ jobs:
               exit 1
             fi
           done
-
-          echo "✅ KSU Next integrated (git version auto‑detected)"
+          echo "✅ KSU Next v3.1.0‑legacy integrated (no setup.sh)"
           
       - name: "🔍 Check driver build integration"
         working-directory: ./kernel
@@ -341,7 +291,7 @@ jobs:
       - name: "Final verify"
         working-directory: ./kernel
         run: |
-          grep -q "^CONFIG_OVERLAY_FS=y" "$DEFCONFIG" && echo "✅ CONFIG_OVERLAY_FS=y" || { echo "❌ CONFIG_OVERLAY_FS=y MISSING"; exit 1; }
+          grep -q "^CONFIG_OVERLAY_FS=y" arch/arm64/configs/exynos7885-a20_defconfig && echo "✅ CONFIG_OVERLAY_FS=y" || { echo "❌ CONFIG_OVERLAY_FS=y MISSING"; exit 1; }
           grep -q "^CONFIG_KSU=y" out/.config || { echo "FAIL1"; exit 1; }
           [ -f out/drivers/kernelsu/ksu.o ] || [ -f out/drivers/kernelsu/built-in.o ] || { echo "FAIL2"; exit 1; }
           [ -f out/arch/arm64/boot/Image ] || { echo "FAIL3"; exit 1; }
