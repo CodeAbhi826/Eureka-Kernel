@@ -1,0 +1,441 @@
+name: Build KSU Next Legacy
+
+on:
+  push:
+    branches: [ "R15-OneUI" ]
+    paths:
+      - '.github/workflows/build-ksun.yml'
+  workflow_dispatch:
+    inputs:
+      ksu_version:
+        description: 'KernelSU Next version (legacy)'
+        type: choice
+        required: true
+        default: 'v3.1.0-legacy'
+        options:
+          - 'v3.1.0-legacy'
+          - 'v3.1.0-legacy-susfs'
+          - 'v3.0.1-legacy'
+          - 'v3.0.0'
+      device:
+        description: 'Device defconfig'
+        required: true
+        default: 'exynos7885-a20e_defconfig'
+        type: choice
+        options:
+          - exynos7885-a20e_defconfig
+          - exynos7885-a20e_defconfig
+          - exynos7885-a10_defconfig
+          - exynos7885-a30_defconfig
+          - exynos7885-a30s_defconfig
+          - exynos7885-a40_defconfig
+          - exynos7885-a7y18lte_defconfig
+          - exynos7885-a8y18lte_defconfig
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: "[0/8] Checkout Eureka Kernel source"
+        uses: actions/checkout@v4
+        with:
+          repository: eurekadevelopment/Eureka-Kernel
+          ref: R15-OneUI
+          path: kernel
+
+      - name: "Verify checkout"
+        run: |
+          [ -f kernel/Makefile ] || { echo "FAIL"; exit 1; }
+          echo "OK"
+
+      - name: "[1/8] Install dependencies"
+        run: |
+          sudo apt update -qq
+          sudo apt install -y bc bison flex libssl-dev make git python3 cpio gcc-aarch64-linux-gnu
+          # Enable universe repo (required for coccinelle on Ubuntu 24.04)
+          sudo add-apt-repository -y universe
+          sudo apt update -qq
+          sudo apt install -y coccinelle
+          # Verify spatch (the Coccinelle binary) is available
+          command -v spatch || { echo "spatch not found"; exit 1; }
+
+      - name: "Verify deps"
+        run: |
+          for tool in bc bison flex make git python3 spatch aarch64-linux-gnu-gcc; do
+            command -v $tool || { echo "MISSING: $tool"; exit 1; }
+          done
+          echo "OK"
+
+      - name: "[2/8] Neutron Clang toolchain"
+        run: |
+          mkdir -p toolchain && cd toolchain
+          bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") -S=10032024
+          bash <(curl -s "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman") --patch=glibc
+          cd ..
+          echo "$(pwd)/toolchain/bin" >> $GITHUB_PATH
+
+      - name: "Verify toolchain"
+        run: |
+          export PATH="$(pwd)/toolchain/bin:$PATH"
+          for tool in clang ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip; do
+            command -v $tool || { echo "MISSING: $tool"; exit 1; }
+          done
+          echo "OK"
+
+      - name: "[3/8] Set env vars"
+        run: |
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "LD=ld.lld" >> $GITHUB_ENV
+          echo "AR=llvm-ar" >> $GITHUB_ENV
+          echo "NM=llvm-nm" >> $GITHUB_ENV
+          echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
+          echo "OBJDUMP=llvm-objdump" >> $GITHUB_ENV
+          echo "STRIP=llvm-strip" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "ARCH=arm64" >> $GITHUB_ENV
+
+      - name: "Verify env"
+        run: |
+          [ "$ARCH" = "arm64" ] || { echo "BAD ARCH"; exit 1; }
+          echo "OK"
+
+      - name: "[4/8] Patch defconfig"
+        working-directory: ./kernel
+        run: |
+          D="arch/arm64/configs/exynos7885-a20e_defconfig"
+          grep -q "CONFIG_KALLSYMS=y" "$D" || echo "CONFIG_KALLSYMS=y" >> "$D"
+          grep -q "CONFIG_KALLSYMS_ALL=y" "$D" || echo "CONFIG_KALLSYMS_ALL=y" >> "$D"
+          grep -q "CONFIG_KSU=y" "$D" || echo "CONFIG_KSU=y" >> "$D"
+          sed -i 's/^CONFIG_KPROBES=y/# CONFIG_KPROBES is not set/' "$D"
+          sed -i 's/^CONFIG_KRETPROBES=y/# CONFIG_KRETPROBES is not set/' "$D"
+          sed -i 's/^CONFIG_LTO=y/# CONFIG_LTO is not set/' "$D"
+          grep -q "CONFIG_SIPHASH=y" "$D" || echo "CONFIG_SIPHASH=y" >> "$D"
+          for s in CONFIG_KSU=y CONFIG_KALLSYMS=y CONFIG_KALLSYMS_ALL=y CONFIG_SIPHASH=y; do
+            grep -q "^$s" "$D" || { echo "MISSING: $s"; exit 1; }
+          done
+          echo "OK"
+          # Allow dmesg without root (debug KSU)
+          grep -q "CONFIG_SECURITY_DMESG_RESTRICT" "$D" && sed -i 's/^CONFIG_SECURITY_DMESG_RESTRICT=y/# CONFIG_SECURITY_DMESG_RESTRICT is not set/' "$D" || echo "# CONFIG_SECURITY_DMESG_RESTRICT is not set" >> "$D"
+          # Enable KSU internal debug prints
+          grep -q "CONFIG_KSU_DEBUG=y" "$D" || echo "CONFIG_KSU_DEBUG=y" >> "$D"
+          
+          # Enable OverlayFS for KSU Meta module
+          grep -q "CONFIG_OVERLAY_FS=y" "$D" || echo "CONFIG_OVERLAY_FS=y" >> "$D"
+
+      - name: "🔍 Show current battery/performance features"
+        working-directory: ./kernel
+        run: |
+          D="arch/arm64/configs/exynos7885-a20e_defconfig"
+          echo "=== Battery / Performance features currently enabled ==="
+          grep -E "CONFIG_TCP_CONG|CONFIG_WAKELOCK|CONFIG_IOSCHED|CONFIG_DEFAULT_IOSCHED|CONFIG_BOEFFLA|CONFIG_ARCH_POWER|CONFIG_CRC|CONFIG_FSYNC|CONFIG_STATE_NOTIFIER|CONFIG_POWERSUSPEND" "$D" || echo "(none found)"    
+                    
+      - name: "[5/8] Integrate KSU Next v3.1.0-legacy (no setup.sh, no backport)"
+        working-directory: ./kernel
+        run: |
+          V="v3.1.0-legacy"
+          echo "Using KSU version: $V"
+          rm -rf drivers/kernelsu KernelSU-Next
+
+          # Download the exact release tarball
+          curl -L "https://github.com/KernelSU-Next/KernelSU-Next/archive/refs/tags/${V}.tar.gz" -o /tmp/ksu.tar.gz
+          mkdir -p /tmp/ksu-src
+          tar xzf /tmp/ksu.tar.gz -C /tmp/ksu-src --strip-components=1
+
+          # Copy the kernel driver
+          cp -r /tmp/ksu-src/kernel drivers/kernelsu
+
+          # Keep the original Kbuild, add warning flags and version define
+          echo "ccflags-y += -Wno-strict-prototypes" >> drivers/kernelsu/Kbuild
+          echo "ccflags-y += -Wno-incompatible-pointer-types-discards-qualifiers" >> drivers/kernelsu/Kbuild
+          # Force the correct version and tag (git auto-detect won't work)
+          
+          # Force version directly in the Kbuild (bypass git detection)
+          sed -i 's/^KSU_VERSION_FALLBACK := 1/KSU_VERSION_FALLBACK := 33110/' drivers/kernelsu/Kbuild
+          sed -i 's/^KSU_VERSION_TAG_FALLBACK := v0.0.1/KSU_VERSION_TAG_FALLBACK := v3.1.0-legacy/' drivers/kernelsu/Kbuild
+          
+          # Add the driver to the kernel build (if not already done by the tarball's setup)
+          grep -q 'CONFIG_KSU' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+          grep -q 'CONFIG_KSU' drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+
+          # The driver already has kvmalloc – no compat_backport.o needed
+
+          # Remove MODULE_IMPORT_NS
+          grep -rIl 'MODULE_IMPORT_NS' drivers/kernelsu/ 2>/dev/null | while read f; do
+            sed -i '/MODULE_IMPORT_NS/d' "$f"
+          done
+          [ -f include/linux/compiler_types.h ] || echo '#include <linux/compiler.h>' > include/linux/compiler_types.h
+
+          # Hook header and injection (same as before)
+          cat > include/linux/kernelsu_hook.h << 'HEADEREOF'
+          #ifndef _LINUX_KERNELSU_HOOK_H
+          #define _LINUX_KERNELSU_HOOK_H
+          #include <linux/types.h>
+          #include <linux/sched.h>
+          #include <linux/stat.h>
+          #include <linux/fcntl.h>
+          int ksu_handle_execveat(int *fd, struct filename **filename_ptr,
+                                  void *argv, void *envp, int *flags);
+          int ksu_handle_faccessat(int *dfd, const char __user **filename_user,
+                                  int *mode, int *flags);
+          int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr,
+                                  size_t *count_ptr);
+          int ksu_handle_stat(int *dfd, const char __user **filename_user,
+                             int *flags);
+          int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
+                                    void __user **arg);
+          #endif
+          HEADEREOF
+
+          python3 << 'PYEOF'
+          import re, os
+          def remove_ksu_blocks(text):
+              return re.sub(r'#ifdef\s+CONFIG_KSU\b.*?#endif\s*\n?', '', text, flags=re.DOTALL)
+          def ensure_header(text):
+              if '#include <linux/kernelsu_hook.h>' not in text:
+                  text = '#include <linux/kernelsu_hook.h>\n' + text
+              return text
+          hooks = [
+              ('fs/exec.c', r'return do_execveat_common\(AT_FDCWD, filename, argv, envp, 0\);',
+               '#ifdef CONFIG_KSU\n\tksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);\n#endif\n'),
+              ('fs/open.c', r'if \(mode & ~S_IRWXO\)\s+/\* where\'s F_OK, X_OK, W_OK, R_OK\? \*/',
+               '#ifdef CONFIG_KSU\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n'),
+              ('fs/read_write.c', r'ssize_t ret = -EBADF;',
+               '#ifdef CONFIG_KSU\n\tif (unlikely(ksu_vfs_read_hook))\n\t\tksu_handle_sys_read(fd, &buf, &count);\n#endif\n'),
+              ('fs/stat.c', r'error = vfs_fstatat\(dfd, filename, &stat, flag\);',
+               '#ifdef CONFIG_KSU\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif\n'),
+              ('kernel/reboot.c', r'if \(!ns_capable\(pid_ns->user_ns, CAP_SYS_BOOT\)\)',
+               '#ifdef CONFIG_KSU\n\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif\n'),
+          ]
+          for filepath, pattern, new_code in hooks:
+              if not os.path.exists(filepath): continue
+              with open(filepath, 'r') as f: text = f.read()
+              text = remove_ksu_blocks(text)
+              match = re.search(pattern, text)
+              if match:
+                  start = match.start()
+                  text = text[:start] + new_code + text[start:]
+              text = ensure_header(text)
+              with open(filepath, 'w') as f: f.write(text)
+              print(f'Patched {filepath}')
+          PYEOF
+
+          # Verify hooks
+          for check in \
+            'fs/exec.c:ksu_handle_execveat' \
+            'fs/open.c:ksu_handle_faccessat' \
+            'fs/read_write.c:ksu_handle_sys_read' \
+            'fs/stat.c:ksu_handle_stat' \
+            'kernel/reboot.c:ksu_handle_sys_reboot'; do
+            f="${check%%:*}"
+            s="${check##*:}"
+            if grep -q "$s" "$f"; then
+              echo "  ✅ $f: $s"
+            else
+              echo "  ❌ $f: $s MISSING"
+              exit 1
+            fi
+          done
+          echo "✅ KSU Next v3.1.0‑legacy integrated (no setup.sh)"
+          
+      - name: "🔍 Check driver build integration"
+        working-directory: ./kernel
+        run: |
+          echo "=== Does drivers/Makefile include kernelsu? ==="
+          grep -n 'kernelsu' drivers/Makefile || echo "NOT FOUND"
+          echo ""
+          echo "=== Does drivers/Kconfig source kernelsu? ==="
+          grep -n 'kernelsu' drivers/Kconfig || echo "NOT FOUND"
+          echo ""
+          echo "=== Contents of drivers/kernelsu/Makefile ==="
+          cat drivers/kernelsu/Makefile 2>/dev/null || echo "FILE MISSING"
+          echo ""
+          echo "=== Contents of drivers/kernelsu/Kconfig ==="
+          cat drivers/kernelsu/Kconfig 2>/dev/null || echo "FILE MISSING"
+          echo ""
+          echo "=== All CONFIG_KSU lines in .config ==="
+          grep 'CONFIG_KSU' out/.config 2>/dev/null || echo ".config not found yet"
+      
+      - name: "[7/8] Cleanup"
+        working-directory: ./kernel
+        run: |
+          grep -rIl 'MODULE_IMPORT_NS' drivers/kernelsu/ 2>/dev/null | while read f; do sed -i '/MODULE_IMPORT_NS/d' "$f"; done
+          [ -f include/linux/compiler_types.h ] || echo '#include <linux/compiler.h>' > include/linux/compiler_types.h
+          echo "OK"
+
+      - name: "🔍 Diagnostic: Show syscall definitions"
+        working-directory: ./kernel
+        run: |
+          echo "=== exec.c execveat definition ==="
+          grep -n "SYSCALL_DEFINE.*execveat" fs/exec.c || echo "NOT FOUND"
+          echo ""
+          echo "=== open.c open definition ==="
+          grep -n "SYSCALL_DEFINE.*open" fs/open.c || echo "NOT FOUND"
+          echo ""
+          echo "=== read_write.c read definition ==="
+          grep -n "SYSCALL_DEFINE.*read" fs/read_write.c || echo "NOT FOUND"
+          echo ""
+          echo "=== stat.c newstat definition ==="
+          grep -n "SYSCALL_DEFINE.*newstat" fs/stat.c || echo "NOT FOUND"
+          echo ""
+          echo "=== fork.c clone definition ==="
+          grep -n "SYSCALL_DEFINE.*clone" kernel/fork.c || echo "NOT FOUND"
+      
+      - name: "[8/8] Build kernel"
+        working-directory: ./kernel
+        run: |
+          make O=out ARCH=arm64 exynos7885-a20e_defconfig
+          make -j$(nproc) O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build.log
+
+      - name: "📋 Show build errors (if any)"
+        if: always()   # run even if the build step failed
+        working-directory: ./kernel
+        run: |
+          echo "============================="
+          echo " BUILD ERROR SUMMARY"
+          echo "============================="
+          if grep -E 'error:|fatal error' build.log > /tmp/errors.txt; then
+            echo "First 20 errors (full list in build.log):"
+            head -20 /tmp/errors.txt
+            echo ""
+            echo "Total error lines: $(wc -l < /tmp/errors.txt)"
+          else
+            echo "No compilation errors found."
+          fi
+          echo "============================="
+      
+      - name: "🔍 Show driver build errors"
+        working-directory: ./kernel
+        run: |
+          echo "=== All lines mentioning 'kernelsu' in build.log ==="
+          grep -i 'kernelsu' build.log || echo "(no lines found)"
+          echo ""
+          echo "=== Suspected errors (ld.lld / undefined) ==="
+          grep -E 'undefined|ld.lld: error' build.log || echo "(no linker errors)"
+      
+      - name: "Final verify"
+        working-directory: ./kernel
+        run: |
+          grep -q "^CONFIG_OVERLAY_FS=y" out/.config && echo "✅ CONFIG_OVERLAY_FS=y" || { echo "❌ CONFIG_OVERLAY_FS=y MISSING"; exit 1; }
+          grep -q "^CONFIG_KSU=y" out/.config || { echo "FAIL1"; exit 1; }
+          [ -f out/drivers/kernelsu/ksu.o ] || [ -f out/drivers/kernelsu/built-in.o ] || { echo "FAIL2"; exit 1; }
+          [ -f out/arch/arm64/boot/Image ] || { echo "FAIL3"; exit 1; }
+          strings out/arch/arm64/boot/Image | grep -q "KernelSU" || { echo "FAIL4"; exit 1; }
+          cp out/arch/arm64/boot/Image .
+          echo "ALL OK"
+
+      - name: "📦 Create flashable AnyKernel3 ZIP"
+        working-directory: ./kernel
+        run: |
+          VERSION="${{ github.event.inputs.ksu_version }}"
+          VERSION="${VERSION:-v3.1.0-legacy}"
+          BUILD_NO=$(printf "%03d" ${{ github.run_number }})
+          ZIP_NAME="Eureka-KSU-Next-${VERSION}-a20e-${BUILD_NO}"
+
+          # Clone official AnyKernel3 template
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 /tmp/anykernel
+
+          # Copy kernel image
+          cp out/arch/arm64/boot/Image /tmp/anykernel/
+
+          # Write anykernel.sh with Eureka‑style TWRP messages
+          cat > /tmp/anykernel/anykernel.sh << 'AKEOF'
+          ##############################################################
+          # AnyKernel3 script for Galaxy A20e (Exynos 7885 / r0s)
+          # Based on Eureka Kernel's script – adapted for KSU‑Next
+          ##############################################################
+
+          ### AnyKernel setup
+          # begin properties
+          properties() { '
+          kernel.string=Eureka Kernel with KernelSU Next
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=a20e
+          device.name2=a20e
+          device.name3=a20s
+          device.name4=r0s
+          supported.versions=9 - 14
+          supported.patchlevels=2019-07 - 2025-01
+          '; } # end properties
+
+          # boot shell variables
+          BLOCK=auto;                         # auto‑detect boot partition
+          IS_SLOT_DEVICE=0;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          # import AK3 core
+          . tools/ak3-core.sh;
+
+          # ── Custom TWRP banner (matches Eureka style) ──
+          ui_print " ";
+          ui_print "************************************************";
+          ui_print " ___________                     __            ";
+          ui_print " \_   _____/__ _________   ____ |  | _______   ";
+          ui_print "  |    __)_|  |  \_  __ \_/ __ \|  |/ /\__  \  ";
+          ui_print "  |        \  |  /|  | \/\  ___/|    <  / __ \_";
+          ui_print " /_______  /____/ |__|    \___  >__|_ \(____  /";
+          ui_print "         \/                   \/     \/     \/ ";
+          ui_print "                                                ";
+          ui_print "************************************************";
+          ui_print " Source      : Eureka R15‑OneUI Kernel           ";
+          ui_print " Version     : $VERSION                          ";
+          ui_print " Chipset     : Exynos 7885 with Mali G71 MP2     ";
+          ui_print " Android     : OneUI & AOSP ROMs & GSIs          ";
+          ui_print " Developer   : Eureka Team & CodeAbhi826        ";
+          ui_print " Support     : @eureka_support_group on Telegram ";
+          ui_print "************************************************";
+          ui_print "          KernelSU Next Integration              ";
+          ui_print "************************************************";
+          ui_print " - KernelSU Next v3.1.0‑legacy integrated        ";
+          ui_print " - Manual hooks for non‑GKI 4.4 kernel            ";
+          ui_print " - Backported kvmalloc/kvfree for compatibility   ";
+          ui_print " - SELinux compatibility patches applied          ";
+          ui_print " - Compiled with Neutron Clang                    ";
+          ui_print "************************************************";
+          ui_print " ";
+
+          ## AnyKernel install
+          split_boot;
+          ui_print "- Flashing kernel with KSU Next";
+          flash_boot;
+
+          ui_print "- Installation finished successfully";
+          ui_print " ";
+          ui_print "- Thank you for using Eureka Kernel with KernelSU Next :)";
+          ui_print " ";
+          ## end install
+          AKEOF
+
+          # Create ZIP
+          cd /tmp/anykernel
+          zip -r9 "${ZIP_NAME}.zip" . -x ".git" -x "README.md" -x "LICENSE"
+          cd -
+
+          mv /tmp/anykernel/"${ZIP_NAME}.zip" .
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+
+      - name: "📤 Send kernel to Telegram"
+        run: |
+          ZIP_PATH="kernel/${{ env.ZIP_NAME }}.zip"
+          echo "Sending $ZIP_PATH to Telegram..."
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument" \
+            -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -F document="@${ZIP_PATH}" \
+            -F caption="KSU Next build: ${{ env.ZIP_NAME }}"    
+          
+      - name: "📤 Upload flashable ZIP"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: kernel/${{ env.ZIP_NAME }}.zip
+
+      - name: "📤 Upload build log"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: kernel/build.log
