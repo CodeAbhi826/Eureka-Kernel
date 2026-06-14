@@ -122,6 +122,21 @@ jobs:
           # Enable OverlayFS for KSU Meta module
           grep -q "CONFIG_OVERLAY_FS=y" "$D" || echo "CONFIG_OVERLAY_FS=y" >> "$D"
 
+      - name: "🔍 sanity check"
+        working-directory: ./kernel
+        run: |
+          A20="arch/arm64/configs/exynos7885-a20_defconfig"
+          A20E="arch/arm64/configs/exynos7885-a20e_defconfig"
+          echo "=== Differences between A20 and A20e defconfigs ==="
+          diff -u "$A20" "$A20E" || true
+          echo ""
+          echo "=== Potentially critical options missing in A20e vs A20 ==="
+          # Show only lines present in A20 but missing in A20e
+          comm -23 <(sort "$A20") <(sort "$A20E") | tee /tmp/missing_in_a20e.txt
+          echo ""
+          echo "=== Highlight: touchscreen / display / sensor related ==="
+          grep -iE 'touch|display|panel|sensor|backlight|mipi|dsi|fingerprint|wacom|synaptics|atmel|fts|ili|hx|goodix' /tmp/missing_in_a20e.txt || echo "(no obvious hardware driver missing)"
+      
       - name: "🔍 Show current battery/performance features"
         working-directory: ./kernel
         run: |
