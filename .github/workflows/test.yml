@@ -372,7 +372,6 @@ jobs:
           device.name2=a20e
           device.name3=a20s
           device.name4=r0s
-          supported.versions=9,10,11,12,13,14
           '; } # end properties
 
           # boot shell variables
