@@ -17,6 +17,20 @@ on:
           - 'v3.1.0-legacy-susfs'
           - 'v3.0.1-legacy'
           - 'v3.0.0'
+      device:
+        description: 'Device defconfig'
+        required: true
+        default: 'exynos7885-a20_defconfig'
+        type: choice
+        options:
+          - exynos7885-a20_defconfig
+          - exynos7885-a20e_defconfig
+          - exynos7885-a10_defconfig
+          - exynos7885-a30_defconfig
+          - exynos7885-a30s_defconfig
+          - exynos7885-a40_defconfig
+          - exynos7885-a7y18lte_defconfig
+          - exynos7885-a8y18lte_defconfig
 
 jobs:
   build:
