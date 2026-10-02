@@ -1,8 +1,6 @@
 name: Build Eureka R15 OneUI + KSU Next
 
 on:
-permissions:
-  contents: write
   workflow_dispatch:
     inputs:
       ksu_tag:
@@ -38,10 +36,14 @@ permissions:
           - exynos7885-a7y18lte_defconfig
           - exynos7885-a8y18lte_defconfig
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+
 
     steps:
       - name: Checkout repo (for anykernel.sh)
