@@ -1,6 +1,8 @@
 name: Build Eureka R15 OneUI + KSU Next
 
 on:
+permissions:
+  contents: write
   workflow_dispatch:
     inputs:
       ksu_tag:
@@ -146,6 +148,7 @@ jobs:
       - name: Build kernel
         working-directory: ./kernel
         run: |
+          set -o pipefail
           make -j$(nproc) O=out ARCH=arm64 \
             CC=${CC} LD=${LD} AR=${AR} NM=${NM} \
             OBJCOPY=${OBJCOPY} OBJDUMP=${OBJDUMP} STRIP=${STRIP} \
@@ -197,7 +200,7 @@ jobs:
       - name: Upload kernel ZIP to release
         uses: softprops/action-gh-release@v1
         with:
-          files: skewkernel-${{ env.BUILD_NO }}.zip
+          files: ${{ env.ZIP_NAME }}.zip
           tag_name: latest
           name: "Build #${{ github.run_number }}"
           body: "Automated build from ${{ github.ref }}"
