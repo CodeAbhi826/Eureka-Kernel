@@ -75,10 +75,10 @@ jobs:
           echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
           echo "ARCH=arm64" >> $GITHUB_ENV
 
-      - name: Clone Eureka Kernel R15-OneUI
+      - name: Clone Eureka Kernel (${{ github.ref_name }})
         run: |
           rm -rf kernel
-          git clone --depth 1 https://github.com/eurekadevelopment/Eureka-Kernel.git -b R15-OneUI kernel
+          git clone --depth 1 "${{ github.server_url }}/${{ github.repository }}.git" -b "${{ github.ref_name }}" kernel
           cd kernel
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
@@ -146,6 +146,16 @@ jobs:
         run: |
           grep -q "CONFIG_KSU=y" "${{ github.workspace }}/kernel/out/.config" || { echo "ERROR: KernelSU not enabled!"; exit 1; }
           echo "KernelSU config verified OK"
+
+      - name: Verify PSI & A20 config
+        run: |
+          CFG="${{ github.workspace }}/kernel/out/.config"
+          grep -q "CONFIG_PSI=y" "$CFG" || { echo "ERROR: CONFIG_PSI=y missing!"; exit 1; }
+          grep -q "CONFIG_SCHED_HMP=y" "$CFG" || { echo "ERROR: CONFIG_SCHED_HMP=y missing!"; exit 1; }
+          grep -q "CONFIG_LITTLE_CPU_MASK=63" "$CFG" || { echo "ERROR: CONFIG_LITTLE_CPU_MASK=63 missing!"; exit 1; }
+          grep -q "CONFIG_BIG_CPU_MASK=192" "$CFG" || { echo "ERROR: CONFIG_BIG_CPU_MASK=192 missing!"; exit 1; }
+          grep -q "CONFIG_CPU_IDLE_GOV_MENU=y" "$CFG" || { echo "ERROR: CONFIG_CPU_IDLE_GOV_MENU=y missing!"; exit 1; }
+          echo "PSI & A20 config verified OK"
 
       - name: Build kernel
         working-directory: ./kernel
