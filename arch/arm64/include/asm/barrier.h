@@ -136,6 +136,10 @@ do {									\
 #define smp_mb__before_atomic()	smp_mb()
 #define smp_mb__after_atomic()	smp_mb()
 
+#ifndef smp_acquire__after_ctrl_dep
+#define smp_acquire__after_ctrl_dep()	smp_rmb()
+#endif
+
 #endif	/* __ASSEMBLY__ */
 
 #endif	/* __ASM_BARRIER_H */
