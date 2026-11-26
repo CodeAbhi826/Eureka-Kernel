@@ -401,16 +401,18 @@ next:
 	return 0;
 }
 
-static const struct mm_walk_ops madvise_free_walk_ops = {
-	.pmd_entry		= madvise_free_pte_range,
-};
-
 static void madvise_free_page_range(struct mmu_gather *tlb,
 			     struct vm_area_struct *vma,
 			     unsigned long addr, unsigned long end)
 {
+	struct mm_walk free_walk = {
+		.pmd_entry = madvise_free_pte_range,
+		.mm = vma->vm_mm,
+		.private = tlb,
+	};
+
 	tlb_start_vma(tlb, vma);
-	walk_page_range(vma->vm_mm, addr, end, &madvise_free_walk_ops, tlb);
+	walk_page_range(addr, end, &free_walk);
 	tlb_end_vma(tlb, vma);
 }
 
